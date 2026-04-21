@@ -554,23 +554,45 @@
                   const s = CATEGORIES[cat];
                   const sh = CATEGORY_SHADERS[cat];
                   const count = newCounts[cat] || 0;
+                  const isSelected = selectedCategory === cat;
                   return (
-                    <div key={cat} className="relative h-36 sm:h-40 rounded-2xl overflow-hidden">
-                      <div className="absolute inset-0 rounded-2xl overflow-hidden"><WarpShader colors={sh.colors} shape={sh.shape} speed={0.8} /></div>
-                      <div className="absolute inset-0 bg-black/45" />
-                      <div className="relative h-full p-3.5 flex flex-col justify-between">
+                    <button
+                      key={cat}
+                      onClick={() => {
+                        setSelectedCategory(isSelected ? '전체' : cat);
+                        // 목록으로 스크롤
+                        setTimeout(() => {
+                          document.getElementById('content-list')?.scrollIntoView({ 
+                            behavior: 'smooth', 
+                            block: 'start' 
+                          });
+                        }, 100);
+                      }}
+                      className={`relative h-36 sm:h-40 rounded-2xl overflow-hidden group cursor-pointer transition-all duration-300 ${
+                        isSelected 
+                          ? 'ring-4 ring-white/60 scale-[1.03] shadow-2xl' 
+                          : 'hover:scale-[1.02] hover:ring-2 hover:ring-white/30'
+                      }`}
+                    >
+                      <div className="absolute inset-0 rounded-2xl overflow-hidden">
+                        <WarpShader colors={sh.colors} shape={sh.shape} speed={0.8} />
+                      </div>
+                      <div className={`absolute inset-0 transition-colors ${isSelected ? 'bg-black/25' : 'bg-black/45 group-hover:bg-black/35'}`} />
+                      <div className="relative h-full p-3.5 flex flex-col justify-between text-left">
                         <div className="flex items-start justify-between">
                           <div className="p-2 rounded-lg bg-white/15 border border-white/20">
                             <Icon name={s.iconName} size={24} strokeWidth={1.8} className="text-white drop-shadow-lg" />
                           </div>
-                          {count > 0 && <div className="px-1.5 py-0.5 bg-red-500 rounded-full text-[9px] font-bold text-white shadow-lg">NEW</div>}
+                          {count > 0 && (
+                            <div className="px-1.5 py-0.5 bg-red-500 rounded-full text-[9px] font-bold text-white shadow-lg">NEW</div>
+                          )}
                         </div>
                         <div className="flex items-end justify-between gap-2">
                           <h3 className="text-base sm:text-lg font-extrabold text-white drop-shadow-lg min-w-0 truncate">{cat}</h3>
                           <div className="text-4xl font-black text-white leading-none drop-shadow-lg tabular-nums flex-shrink-0">{count}</div>
                         </div>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -638,7 +660,7 @@
             )}
 
             {/* Content */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+            <div id="content-list" className="max-w-7xl mx-auto px-4 sm:px-6 py-4 scroll-mt-20">
               <div className="mb-5 flex items-center justify-between pb-3 border-b border-white/10">
                 <div className="flex items-center gap-3">
                   <h3 className="text-lg font-bold">{selectedCategory === '전체' ? '전체' : selectedCategory}</h3>
