@@ -6,13 +6,20 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-export default async function handler(req, res) {
+const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
+};
+
+export default async function handler(req, res) {
+  setCorsHeaders(res);
   
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
   if (req.method !== 'POST') {
@@ -58,13 +65,13 @@ export default async function handler(req, res) {
 
     const result = JSON.parse(response.choices[0].message.content);
     
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       summary: result.summary,
       category: result.category || '기타',
     });
   } catch (err) {
     console.error('Summarize error:', err);
-    return res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 }
