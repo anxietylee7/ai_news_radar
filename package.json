@@ -1,0 +1,12 @@
+{
+  "name": "ai-radar-backend",
+  "version": "1.0.0",
+  "description": "AI Radar Backend - Proxy for Hacker News, Reddit, arXiv + OpenAI summarization",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "openai": "^4.77.0"
+  }
+}
