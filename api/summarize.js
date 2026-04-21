@@ -1,6 +1,8 @@
-// api/summarize.js - OpenAI GPT-4o로 한국어 요약 + 카테고리 분류 + AI 관련성 판단
+// api/summarize.js - gpt-4o-mini + Vercel KV 캐싱
 
 import OpenAI from 'openai';
+import { kv } from '@vercel/kv';
+import crypto from 'crypto';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -12,6 +14,15 @@ const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
   res.setHeader('Access-Control-Max-Age', '86400');
   res.setHeader('Access-Control-Allow-Credentials', 'false');
+};
+
+// 캐시 키 생성 (제목 + 내용으로 해시)
+const getCacheKey = (title, content) => {
+  const hash = crypto
+    .createHash('md5')
+    .update(`${title}::${content || ''}`)
+    .digest('hex');
+  return `summary:${hash}`;
 };
 
 export default async function handler(req, res) {
@@ -33,8 +44,25 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'title is required' });
     }
 
+    // 🔍 1. 캐시 확인 (24시간 유효)
+    const cacheKey = getCacheKey(title, content);
+    try {
+      const cached = await kv.get(cacheKey);
+      if (cached) {
+        return res.status(200).json({
+          success: true,
+          cached: true,
+          ...cached,
+        });
+      }
+    } catch (cacheErr) {
+      console.warn('Cache read failed:', cacheErr.message);
+      // 캐시 실패해도 계속 진행
+    }
+
+    // 🤖 2. 캐시 미스 → GPT-4o-mini 호출
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-4o-mini',
       max_tokens: 500,
       temperature: 0.2,
       messages: [
@@ -65,7 +93,7 @@ export default async function handler(req, res) {
 - 자연/과학/인문학 (분재, 예술, 역사 등)
 - 일반 비즈니스, 스타트업 (AI 무관)
 - 생활, 취미, 엔터테인먼트
-- 단순히 "AI" 글자가 우연히 포함된 단어 (bonsAI, emAIl 등)
+- 단순히 "AI" 글자가 우연히 포함된 단어 (bonsAI 등)
 
 제목만 보고 AI와의 연관성이 **분명하지 않으면 false**로 판단하세요.
 
@@ -112,22 +140,8 @@ isAIRelated가 false면 summary는 "AI 관련 내용이 아닙니다"로 고정
 - 여러 입력 타입 동시 처리
 
 ### 기타
-- 위 5개에 명확히 속하지 않는 AI 관련 (하드웨어, 정책)
-- AI와 무관하면 이 카테고리 사용 (어차피 숨김 처리됨)
-
-## 예시
-
-입력: "Bonsai styling techniques from Japan"
-→ { "isAIRelated": false, "summary": "AI 관련 내용이 아닙니다", "category": "기타" }
-
-입력: "Sonnet 4.6 model could mistakenly use wrong model for OpenAI"
-→ { "isAIRelated": true, "summary": "Claude Sonnet 4.6이 OpenAI용 설정에서 잘못된 모델을 사용할 수 있는 문제가 제기되었습니다.", "category": "LLM" }
-
-입력: "A Pascal's Wager for AI doomers"
-→ { "isAIRelated": true, "summary": "AI 종말론자들을 위한 파스칼의 내기 논증을 다룬 글입니다. AGI 위험 대비가 합리적인지 분석합니다.", "category": "LLM" }
-
-입력: "New React 19 features announced"
-→ { "isAIRelated": false, "summary": "AI 관련 내용이 아닙니다", "category": "기타" }`
+- 위 5개에 명확히 속하지 않는 AI 관련
+- AI와 무관하면 이 카테고리 사용`
         },
         {
           role: 'user',
@@ -139,11 +153,23 @@ isAIRelated가 false면 summary는 "AI 관련 내용이 아닙니다"로 고정
 
     const result = JSON.parse(response.choices[0].message.content);
     
-    res.status(200).json({
-      success: true,
-      isAIRelated: result.isAIRelated !== false, // 기본 true
+    const payload = {
+      isAIRelated: result.isAIRelated !== false,
       summary: result.summary,
       category: result.category || '기타',
+    };
+
+    // 💾 3. 결과 캐싱 (24시간 = 86400초)
+    try {
+      await kv.set(cacheKey, payload, { ex: 86400 });
+    } catch (cacheErr) {
+      console.warn('Cache write failed:', cacheErr.message);
+    }
+    
+    res.status(200).json({
+      success: true,
+      cached: false,
+      ...payload,
     });
   } catch (err) {
     console.error('Summarize error:', err);
