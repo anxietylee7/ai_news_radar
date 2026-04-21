@@ -1,0 +1,9 @@
+{
+  "name": "ai-news-radar",
+  "version": "1.0.0",
+  "description": "AI News Radar - Real-time AI tech news dashboard",
+  "type": "module",
+  "dependencies": {
+    "openai": "^4.77.0"
+  }
+}
