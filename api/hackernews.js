@@ -13,16 +13,25 @@ const isAIRelated = (text) => {
   return AI_KEYWORDS.some(keyword => lower.includes(keyword));
 };
 
-export default async function handler(req, res) {
+// CORS 헤더 설정 (강화)
+const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
+};
+
+export default async function handler(req, res) {
+  setCorsHeaders(res);
   
+  // Preflight OPTIONS 요청 처리
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
   try {
-    // Top Stories + New Stories 둘 다 가져와서 AI 관련 글 필터링
     const [topRes, newRes] = await Promise.all([
       fetch('https://hacker-news.firebaseio.com/v0/topstories.json'),
       fetch('https://hacker-news.firebaseio.com/v0/newstories.json'),
@@ -33,7 +42,6 @@ export default async function handler(req, res) {
     const topIds = await topRes.json();
     const newIds = newRes.ok ? await newRes.json() : [];
     
-    // 중복 제거하고 상위 100개만
     const allIds = [...new Set([...topIds.slice(0, 60), ...newIds.slice(0, 40)])];
     
     const storyPromises = allIds.map(id =>
@@ -44,7 +52,6 @@ export default async function handler(req, res) {
     
     const stories = await Promise.all(storyPromises);
     
-    // 최근 3일 내 + AI 관련만
     const threeDaysAgo = Date.now() / 1000 - 3 * 24 * 3600;
     
     const filtered = stories
@@ -66,9 +73,9 @@ export default async function handler(req, res) {
         originalText: story.title,
       }));
     
-    return res.status(200).json({ success: true, data: filtered });
+    res.status(200).json({ success: true, data: filtered });
   } catch (err) {
     console.error('HN error:', err);
-    return res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 }
