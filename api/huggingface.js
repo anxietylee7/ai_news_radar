@@ -1,15 +1,22 @@
 // api/huggingface.js - HuggingFace Papers에서 큐레이션된 AI 논문 가져오기
 
-export default async function handler(req, res) {
+const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
+};
+
+export default async function handler(req, res) {
+  setCorsHeaders(res);
   
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
   try {
-    // 최근 3일치 데이터 가져오기
     const today = new Date();
     const dates = [];
     for (let i = 0; i < 3; i++) {
@@ -26,7 +33,6 @@ export default async function handler(req, res) {
 
     for (const date of dates) {
       try {
-        // HuggingFace Papers 특정 날짜 페이지
         const response = await fetch(
           `https://huggingface.co/api/daily_papers?date=${date}`,
           {
@@ -38,7 +44,6 @@ export default async function handler(req, res) {
         );
 
         if (!response.ok) {
-          // API가 실패하면 HTML 페이지에서 파싱 시도
           throw new Error(`HTTP ${response.status}`);
         }
 
@@ -69,7 +74,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // 중복 제거 (같은 논문이 여러 날짜에 올라올 수 있음)
     const seen = new Set();
     const uniquePapers = allPapers.filter(p => {
       if (seen.has(p.id)) return false;
@@ -77,16 +81,15 @@ export default async function handler(req, res) {
       return true;
     });
 
-    // upvote 순 정렬
     uniquePapers.sort((a, b) => b.score - a.score);
 
-    return res.status(200).json({
+    res.status(200).json({
       success: uniquePapers.length > 0,
       data: uniquePapers.slice(0, 50),
       warnings: errors.length > 0 ? errors : null,
     });
   } catch (err) {
     console.error('HuggingFace error:', err);
-    return res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 }
