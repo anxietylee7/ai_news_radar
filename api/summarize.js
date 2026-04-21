@@ -1,4 +1,4 @@
-// api/summarize.js - OpenAI GPT-4o로 한국어 요약 + 카테고리 분류
+// api/summarize.js - OpenAI GPT-4o로 한국어 요약 + 카테고리 분류 + AI 관련성 판단
 
 import OpenAI from 'openai';
 
@@ -40,25 +40,47 @@ export default async function handler(req, res) {
       messages: [
         {
           role: 'system',
-          content: `당신은 AI/머신러닝 기술 뉴스를 한국어로 요약하고 분류하는 최고의 전문가입니다. 기술 용어에 능통하고, 자연스러운 한국어 번역이 가능합니다.
+          content: `당신은 AI/머신러닝 기술 뉴스를 한국어로 요약하고 분류하는 최고의 전문가입니다.
 
 ## 출력 형식
 다른 설명 없이 아래 JSON 형식으로만 답변하세요:
 {
+  "isAIRelated": true | false,
   "summary": "한국어 요약 (규칙 준수)",
   "category": "Vision" | "LLM" | "TTS" | "Agent" | "Multimodal" | "기타"
 }
 
-## 요약 작성 규칙
-1. **2-3문장**으로 핵심만 간결하게
-2. **자연스러운 한국어**로 작성 (직역체 금지, 어색한 어미 금지)
-3. 기술 용어는 **한글 + 영문 병기** (예: "언어 모델(LLM)", "대규모 언어 모델(LLM)은...")
-4. 고유명사(제품명, 회사명)는 **원문 그대로** 유지 (예: GPT-4, Claude, Gemini, Llama)
-5. 수치, 성능, 주요 특징은 **구체적으로** 포함
-6. 내용이 부족하면 제목에서 추론하여 맥락을 추가
-7. 클릭을 유도하는 문구 금지 ("자세히 보기" 등)
+## AI 관련성 판단 (isAIRelated) - 중요!
+다음은 **AI 관련 주제**입니다 (true):
+- AI/ML 기술, 모델, 연구, 논문
+- AI 제품, 서비스 (ChatGPT, Claude, Midjourney 등)
+- AI 기업 소식 (OpenAI, Anthropic, Google AI, Meta AI 등)
+- AI 산업, 규제, 비즈니스, 투자
+- AI 윤리, 안전성, 철학 논의
+- 머신러닝 도구, 라이브러리 (LangChain, PyTorch 등)
+- AI 하드웨어 (GPU, TPU, AI 칩)
 
-## 카테고리 분류 기준 (엄격히 적용)
+다음은 **AI와 무관한 주제**입니다 (false):
+- 일반 프로그래밍, 웹 개발 (AI 언급 없이)
+- 자연/과학/인문학 (분재, 예술, 역사 등)
+- 일반 비즈니스, 스타트업 (AI 무관)
+- 생활, 취미, 엔터테인먼트
+- 단순히 "AI" 글자가 우연히 포함된 단어 (bonsAI, emAIl 등)
+
+제목만 보고 AI와의 연관성이 **분명하지 않으면 false**로 판단하세요.
+
+## 요약 작성 규칙 (isAIRelated가 true일 때만)
+1. **2-3문장**으로 핵심만 간결하게
+2. **자연스러운 한국어**로 작성 (직역체 금지)
+3. 기술 용어는 **한글 + 영문 병기** (예: "언어 모델(LLM)")
+4. 고유명사는 **원문 그대로** (GPT-4, Claude, Gemini 등)
+5. 수치, 성능, 주요 특징은 **구체적으로** 포함
+6. 내용이 부족하면 제목에서 추론하여 맥락 추가
+7. 클릭 유도 문구 금지
+
+isAIRelated가 false면 summary는 "AI 관련 내용이 아닙니다"로 고정
+
+## 카테고리 분류 기준
 
 ### Vision
 - 이미지 생성: Stable Diffusion, DALL-E, Midjourney, FLUX
@@ -68,51 +90,48 @@ export default async function handler(req, res) {
 
 ### LLM (가장 넓게 해석)
 - 언어 모델: GPT, Claude(Sonnet/Opus/Haiku), Gemini(텍스트), Llama, Mistral, Qwen, DeepSeek, Grok
-- LLM 관련 기술: RAG, Fine-tuning, Prompt Engineering, Tokenization, Context window
-- LLM 서비스/플랫폼: ChatGPT, Perplexity, Cursor, Claude Code
-- LLM 산업/비즈니스/논의: AI 거품론, LLM 비용, AI 규제, OpenAI 소식 (모델 관련이면)
+- LLM 관련 기술: RAG, Fine-tuning, Prompt Engineering, Tokenization
+- LLM 서비스: ChatGPT, Perplexity, Cursor, Claude Code
+- LLM 산업/비즈니스/논의: AI 거품론, AI 규제, OpenAI 소식
 - LLM 벤치마크, 평가, 연구
-- 코딩 AI: Copilot, Codex, Claude Code (이것도 LLM)
+- 코딩 AI: Copilot, Codex, Claude Code
 
-### TTS (음성 전용)
+### TTS
 - 음성 합성(TTS): ElevenLabs, Kokoro
 - 음성 인식(ASR/STT): Whisper
-- 음성 복제(Voice Cloning)
-- 음악 생성: Suno, Udio (음성 기술 포함)
+- 음성 복제, 음악 생성: Suno, Udio
 
-### Agent (자율 실행 에이전트)
+### Agent
 - 자율 AI 에이전트: AutoGPT, BabyAGI, CrewAI
-- 에이전트 프레임워크: LangChain, LangGraph, LlamaIndex (에이전트 맥락에서)
+- 에이전트 프레임워크: LangChain, LangGraph
 - 워크플로우 자동화, 브라우저 자동화
-- 여러 도구를 사용하는 AI 시스템
 
-### Multimodal (여러 모달리티를 동시에 결합)
-- GPT-4o 음성 모드, Gemini Live (음성+비전+텍스트)
-- Vision-Language Models: VLA, 로보틱스+언어
-- 여러 입력 타입을 동시 처리하는 시스템
-- (단일 모달리티는 해당 카테고리로 - 예: Gemini 텍스트만 = LLM)
+### Multimodal
+- GPT-4o 음성 모드, Gemini Live
+- Vision-Language Models, 로보틱스+언어
+- 여러 입력 타입 동시 처리
 
-### 기타 (마지막 선택지)
-- 위 5개에 명확히 속하지 않는 AI 관련 (하드웨어, 정책, 일반 뉴스)
-- **최대한 위 카테고리 중 하나로 분류하고, 정말 애매한 경우만 기타**
+### 기타
+- 위 5개에 명확히 속하지 않는 AI 관련 (하드웨어, 정책)
+- AI와 무관하면 이 카테고리 사용 (어차피 숨김 처리됨)
 
 ## 예시
 
-입력: "Sonnet 4.6 model could mistakenly use wrong model for OpenAI"
-→ category: "LLM" (Claude Sonnet 모델 관련이므로)
-→ summary: "Claude Sonnet 4.6이 OpenAI용 설정에서 잘못된 모델을 사용할 수 있는 문제가 제기되었습니다. 사용자가 모델 선택 시 주의가 필요합니다."
+입력: "Bonsai styling techniques from Japan"
+→ { "isAIRelated": false, "summary": "AI 관련 내용이 아닙니다", "category": "기타" }
 
-입력: "NSA is using Anthropic's Mythos despite blacklist"
-→ category: "LLM" (Anthropic 모델 관련)
-→ summary: "미국 국가안보국(NSA)이 블랙리스트에도 불구하고 Anthropic의 Mythos 모델을 사용 중인 것으로 알려졌습니다. AI 기업과 정부 기관의 관계에 대한 논의를 촉발시켰습니다."
+입력: "Sonnet 4.6 model could mistakenly use wrong model for OpenAI"
+→ { "isAIRelated": true, "summary": "Claude Sonnet 4.6이 OpenAI용 설정에서 잘못된 모델을 사용할 수 있는 문제가 제기되었습니다.", "category": "LLM" }
 
 입력: "A Pascal's Wager for AI doomers"
-→ category: "LLM" (AI 안전성/철학 논의)
-→ summary: "AI 종말론자들을 위한 파스칼의 내기 논증을 다룬 글입니다. AGI 위험에 대한 대비가 합리적 선택인지 철학적으로 분석합니다."`
+→ { "isAIRelated": true, "summary": "AI 종말론자들을 위한 파스칼의 내기 논증을 다룬 글입니다. AGI 위험 대비가 합리적인지 분석합니다.", "category": "LLM" }
+
+입력: "New React 19 features announced"
+→ { "isAIRelated": false, "summary": "AI 관련 내용이 아닙니다", "category": "기타" }`
         },
         {
           role: 'user',
-          content: `다음 AI 관련 글을 JSON 형식으로 요약 및 분류해주세요.\n\n제목: ${title}\n\n${content && content !== title ? `내용: ${content}` : '(본문 없음 - 제목에서 추론)'}`
+          content: `다음 글의 AI 관련성을 판단하고, AI 관련이면 요약 및 분류해주세요.\n\n제목: ${title}\n\n${content && content !== title ? `내용: ${content}` : '(본문 없음 - 제목에서 판단)'}`
         }
       ],
       response_format: { type: 'json_object' },
@@ -122,6 +141,7 @@ export default async function handler(req, res) {
     
     res.status(200).json({
       success: true,
+      isAIRelated: result.isAIRelated !== false, // 기본 true
       summary: result.summary,
       category: result.category || '기타',
     });
