@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI News Radar</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    @keyframes orb-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes orb-pulse { 0%, 100% { opacity: 0.6; transform: scale(1); } 50% { opacity: 1; transform: scale(1.1); } }
+    .scrollbar-hide::-webkit-scrollbar { display: none; }
+    .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .line-clamp-5 { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-type="module">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // lucide-react 대신 lucide의 아이콘을 SVG로 직접 사용
+    const Icon = ({ name, size = 16, strokeWidth = 2, className = '', ...props }) => {
+      const ref = useRef(null);
+      useEffect(() => {
+        if (ref.current) {
+          ref.current.innerHTML = '';
+          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          svg.setAttribute('width', size);
+          svg.setAttribute('height', size);
+          svg.setAttribute('viewBox', '0 0 24 24');
+          svg.setAttribute('fill', 'none');
+          svg.setAttribute('stroke', 'currentColor');
+          svg.setAttribute('stroke-width', strokeWidth);
+          svg.setAttribute('stroke-linecap', 'round');
+          svg.setAttribute('stroke-linejoin', 'round');
+          svg.setAttribute('class', className);
+          const data = window.lucide?.icons?.[name];
+          if (data) {
+            const children = data[2] || [];
+            children.forEach(([tag, attrs]) => {
+              const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+              Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+              svg.appendChild(el);
+            });
+          }
+          ref.current.appendChild(svg);
+        }
+      }, [name, size, strokeWidth, className]);
+      return <span ref={ref} className={className} style={{ display: 'inline-flex' }} {...props} />;
+    };
+
+    // API 베이스 - 같은 도메인이라 상대 경로 사용
+    const API_BASE = '';
+
+    const CATEGORIES = {
+      'Vision': { gradient: 'from-purple-400 to-pink-400', gradientFrom: '#a955ff', gradientTo: '#ea51ff', text: 'text-purple-300', dot: 'bg-purple-400', iconName: 'eye' },
+      'LLM': { gradient: 'from-blue-400 to-cyan-400', gradientFrom: '#56CCF2', gradientTo: '#2F80ED', text: 'text-blue-300', dot: 'bg-blue-400', iconName: 'message-square' },
+      'TTS': { gradient: 'from-green-400 to-emerald-400', gradientFrom: '#80FF72', gradientTo: '#7EE8FA', text: 'text-green-300', dot: 'bg-green-400', iconName: 'sparkles' },
+      'Agent': { gradient: 'from-orange-400 to-amber-400', gradientFrom: '#FF9966', gradientTo: '#FF5E62', text: 'text-orange-300', dot: 'bg-orange-400', iconName: 'bot' },
+      'Multimodal': { gradient: 'from-pink-400 to-rose-400', gradientFrom: '#ffa9c6', gradientTo: '#f434e2', text: 'text-pink-300', dot: 'bg-pink-400', iconName: 'layers' },
+      '기타': { gradient: 'from-gray-400 to-slate-400', gradientFrom: '#94a3b8', gradientTo: '#64748b', text: 'text-gray-300', dot: 'bg-gray-400', iconName: 'more-horizontal' },
+    };
+
+    const SOURCES = {
+      'HackerNews': { color: 'text-orange-300', bg: 'bg-orange-500/15', icon: 'Y' },
+      'arXiv': { color: 'text-gray-200', bg: 'bg-gray-500/20', icon: 'X' },
+      'HuggingFace': { color: 'text-yellow-300', bg: 'bg-yellow-500/15', icon: '🤗' },
+    };
+
+    const categorizeItem = (title, content = '') => {
+      const text = (title + ' ' + content).toLowerCase();
+      if (/\b(vision|image|diffusion|dalle|midjourney|stable diffusion|sd|gan|visual|photo|이미지|컴퓨터비전)\b/.test(text)) return 'Vision';
+      if (/\b(tts|speech|voice|audio|whisper|elevenlabs|음성)\b/.test(text)) return 'TTS';
+      if (/\b(agent|autogpt|autonomous|langchain|crewai|agentic|에이전트)\b/.test(text)) return 'Agent';
+      if (/\b(multimodal|gpt-4o|gemini|vision.language|vlm|멀티모달)\b/.test(text)) return 'Multimodal';
+      if (/\b(llm|gpt|claude|llama|mistral|gemini|chatgpt|transformer|language model|언어모델)\b/.test(text)) return 'LLM';
+      return '기타';
+    };
+
+    // Beams Background
+    const createBeam = (w, h) => ({
+      x: Math.random() * w * 1.5 - w * 0.25,
+      y: Math.random() * h * 1.5 - h * 0.25,
+      width: 30 + Math.random() * 60,
+      length: h * 2.5,
+      angle: -35 + Math.random() * 10,
+      speed: 0.6 + Math.random() * 1.2,
+      opacity: 0.12 + Math.random() * 0.16,
+      hue: 190 + Math.random() * 70,
+      pulse: Math.random() * Math.PI * 2,
+      pulseSpeed: 0.02 + Math.random() * 0.03,
+    });
+
+    const BeamsBackground = () => {
+      const canvasRef = useRef(null);
+      const beamsRef = useRef([]);
+      const animRef = useRef(0);
+
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const update = () => {
+          const dpr = window.devicePixelRatio || 1;
+          canvas.width = window.innerWidth * dpr;
+          canvas.height = window.innerHeight * dpr;
+          canvas.style.width = window.innerWidth + 'px';
+          canvas.style.height = window.innerHeight + 'px';
+          ctx.scale(dpr, dpr);
+          beamsRef.current = Array.from({ length: 30 }, () => createBeam(canvas.width, canvas.height));
+        };
+        update();
+        window.addEventListener('resize', update);
+
+        const draw = () => {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.filter = 'blur(35px)';
+          beamsRef.current.forEach((beam, i) => {
+            beam.y -= beam.speed;
+            beam.pulse += beam.pulseSpeed;
+            if (beam.y + beam.length < -100) {
+              const col = i % 3;
+              const sp = canvas.width / 3;
+              beam.y = canvas.height + 100;
+              beam.x = col * sp + sp / 2 + (Math.random() - 0.5) * sp * 0.5;
+              beam.hue = 190 + (i * 70) / beamsRef.current.length;
+            }
+            ctx.save();
+            ctx.translate(beam.x, beam.y);
+            ctx.rotate((beam.angle * Math.PI) / 180);
+            const op = beam.opacity * (0.8 + Math.sin(beam.pulse) * 0.2);
+            const g = ctx.createLinearGradient(0, 0, 0, beam.length);
+            g.addColorStop(0, `hsla(${beam.hue}, 85%, 65%, 0)`);
+            g.addColorStop(0.4, `hsla(${beam.hue}, 85%, 65%, ${op})`);
+            g.addColorStop(0.6, `hsla(${beam.hue}, 85%, 65%, ${op})`);
+            g.addColorStop(1, `hsla(${beam.hue}, 85%, 65%, 0)`);
+            ctx.fillStyle = g;
+            ctx.fillRect(-beam.width / 2, 0, beam.width, beam.length);
+            ctx.restore();
+          });
+          animRef.current = requestAnimationFrame(draw);
+        };
+        draw();
+        return () => {
+          window.removeEventListener('resize', update);
+          cancelAnimationFrame(animRef.current);
+        };
+      }, []);
+
+      return (
+        <div className="fixed inset-0 overflow-hidden bg-neutral-950 pointer-events-none" style={{ zIndex: 0 }}>
+          <canvas ref={canvasRef} className="absolute inset-0" style={{ filter: 'blur(15px)' }} />
+          <div className="absolute inset-0 bg-neutral-950/15" />
+        </div>
+      );
+    };
+
+    // Warp Shader
+    const WarpShader = ({ colors, shape, speed = 0.8 }) => {
+      const canvasRef = useRef(null);
+      const animRef = useRef(0);
+      const timeRef = useRef(Math.random() * 1000);
+
+      const withAlpha = (c, a) => c.replace(/^hsl\(/, 'hsla(').replace(/\)$/, `, ${a})`);
+
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        let w = canvas.offsetWidth, h = canvas.offsetHeight;
+        const dpr = window.devicePixelRatio || 1;
+        const resize = () => {
+          w = canvas.offsetWidth;
+          h = canvas.offsetHeight;
+          canvas.width = w * dpr;
+          canvas.height = h * dpr;
+          ctx.scale(dpr, dpr);
+        };
+        resize();
+        const ro = new ResizeObserver(resize);
+        ro.observe(canvas);
+
+        const draw = () => {
+          ctx.clearRect(0, 0, w, h);
+          timeRef.current += 0.003 * speed;
+          const t = timeRef.current;
+
+          const g = ctx.createRadialGradient(
+            w * (0.5 + Math.sin(t * 0.7) * 0.3),
+            h * (0.5 + Math.cos(t * 0.5) * 0.3), 0,
+            w * 0.5, h * 0.5, Math.max(w, h)
+          );
+          g.addColorStop(0, colors[0]);
+          g.addColorStop(0.5, colors[1]);
+          g.addColorStop(1, colors[2]);
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, w, h);
+
+          for (let i = 0; i < 4; i++) {
+            const angle = t + i * Math.PI / 2;
+            const cx = w * 0.5 + Math.sin(angle * 0.8) * w * 0.3;
+            const cy = h * 0.5 + Math.cos(angle * 0.6) * h * 0.3;
+            const r = Math.min(w, h) * (0.3 + Math.sin(t + i) * 0.1);
+            const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+            bg.addColorStop(0, withAlpha(colors[3], 0.67));
+            bg.addColorStop(0.5, withAlpha(colors[i % colors.length], 0.4));
+            bg.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = bg;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          ctx.globalCompositeOperation = 'overlay';
+          if (shape === 'dots') {
+            const sp = 18;
+            for (let x = 0; x < w + sp; x += sp) {
+              for (let y = 0; y < h + sp; y += sp) {
+                const ox = Math.sin(t + y * 0.01) * 5;
+                const oy = Math.cos(t + x * 0.01) * 5;
+                const s = 1.5 + Math.sin(t * 2 + x * 0.05 + y * 0.05) * 1;
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.beginPath();
+                ctx.arc(x + ox, y + oy, Math.max(0.5, s), 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          } else {
+            const s = 14;
+            for (let x = 0; x < w; x += s) {
+              for (let y = 0; y < h; y += s) {
+                if ((Math.floor(x / s) + Math.floor(y / s) + Math.floor(t * 3)) % 2 === 0) {
+                  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+                  ctx.fillRect(x, y, s, s);
+                }
+              }
+            }
+          }
+          ctx.globalCompositeOperation = 'source-over';
+          animRef.current = requestAnimationFrame(draw);
+        };
+        draw();
+        return () => { cancelAnimationFrame(animRef.current); ro.disconnect(); };
+      }, [colors, shape, speed]);
+
+      return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ filter: 'blur(1px)' }} />;
+    };
+
+    const CATEGORY_SHADERS = {
+      'Vision': { colors: ['hsl(280, 100%, 30%)', 'hsl(320, 100%, 60%)', 'hsl(340, 90%, 40%)', 'hsl(300, 100%, 70%)'], shape: 'checks' },
+      'LLM': { colors: ['hsl(200, 100%, 25%)', 'hsl(180, 100%, 65%)', 'hsl(160, 90%, 35%)', 'hsl(190, 100%, 75%)'], shape: 'dots' },
+      'TTS': { colors: ['hsl(120, 100%, 25%)', 'hsl(140, 100%, 60%)', 'hsl(100, 90%, 30%)', 'hsl(130, 100%, 70%)'], shape: 'checks' },
+      'Agent': { colors: ['hsl(30, 100%, 35%)', 'hsl(50, 100%, 65%)', 'hsl(40, 90%, 40%)', 'hsl(45, 100%, 75%)'], shape: 'dots' },
+      'Multimodal': { colors: ['hsl(330, 100%, 30%)', 'hsl(350, 100%, 60%)', 'hsl(340, 90%, 35%)', 'hsl(345, 100%, 75%)'], shape: 'dots' },
+      '기타': { colors: ['hsl(220, 30%, 25%)', 'hsl(220, 40%, 50%)', 'hsl(220, 30%, 35%)', 'hsl(220, 50%, 65%)'], shape: 'checks' },
+    };
+
+    // Flipping Card
+    const FlippingCard = ({ front, back }) => {
+      const [flipped, setFlipped] = useState(false);
+      return (
+        <div className="relative w-full" style={{ perspective: '1200px', height: '360px' }}
+          onMouseEnter={() => setFlipped(true)} onMouseLeave={() => setFlipped(false)}>
+          <div className="relative w-full h-full transition-transform duration-700"
+            style={{ transformStyle: 'preserve-3d', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
+            <div className="absolute inset-0 w-full h-full rounded-2xl overflow-hidden"
+              style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>{front}</div>
+            <div className="absolute inset-0 w-full h-full rounded-2xl overflow-hidden"
+              style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>{back}</div>
+          </div>
+        </div>
+      );
+    };
+
+    // Category Thumbnail
+    const CategoryThumbnail = ({ category }) => {
+      const style = CATEGORIES[category] || CATEGORIES['기타'];
+      return (
+        <div className={`relative w-full h-32 bg-gradient-to-br ${style.gradient} overflow-hidden flex items-center justify-center`}>
+          <div className="absolute inset-0 opacity-30">
+            <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-white/40" style={{ filter: 'blur(32px)' }} />
+            <div className="absolute -bottom-8 -left-8 w-32 h-32 rounded-full bg-white/30" style={{ filter: 'blur(32px)' }} />
+          </div>
+          <div className="absolute top-3 left-4 text-white font-bold text-xs tracking-widest uppercase">{category}</div>
+          <Icon name={style.iconName} size={56} strokeWidth={1.5} className="text-white drop-shadow-lg relative z-10" />
+        </div>
+      );
+    };
+
+    // Orb Input
+    const OrbInput = ({ value, onChange }) => {
+      const [focused, setFocused] = useState(false);
+      const [pi, setPi] = useState(0);
+      const [text, setText] = useState('');
+      const [typing, setTyping] = useState(true);
+      const placeholders = useMemo(() => [
+        '궁금한 AI 기술을 검색해보세요...',
+        'GPT, Claude, Llama 무엇이든 물어보세요',
+        '최신 Vision 모델을 찾아보세요',
+        'Agent, TTS, Multimodal 검색...',
+      ], []);
+      const ivRef = useRef(null);
+      const toRef = useRef(null);
+
+      useEffect(() => {
+        if (ivRef.current) clearInterval(ivRef.current);
+        if (toRef.current) clearTimeout(toRef.current);
+        const cur = placeholders[pi];
+        if (!cur) return;
+        const chars = Array.from(cur);
+        setText(''); setTyping(true);
+        let i = 0;
+        ivRef.current = setInterval(() => {
+          if (i < chars.length) { setText(chars.slice(0, i + 1).join('')); i++; }
+          else {
+            clearInterval(ivRef.current);
+            setTyping(false);
+            toRef.current = setTimeout(() => setPi(p => (p + 1) % placeholders.length), 2200);
+          }
+        }, 75);
+        return () => { if (ivRef.current) clearInterval(ivRef.current); if (toRef.current) clearTimeout(toRef.current); };
+      }, [pi, placeholders]);
+
+      return (
+        <div className="relative">
+          <div className={`flex items-center gap-3 sm:gap-4 p-3 sm:p-3.5 bg-black/70 backdrop-blur-xl shadow-lg transition-all duration-300 rounded-full border-2 ${focused ? 'shadow-2xl shadow-purple-500/30 border-purple-400/50' : 'border-white/20'}`}>
+            <div className="relative flex-shrink-0">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full overflow-hidden ring-2 ring-white/30 relative">
+                <div className="absolute inset-0 rounded-full" style={{ background: 'radial-gradient(circle at 30% 30%, #a855f7, #3b82f6 50%, #ec4899 100%)' }} />
+                <div className="absolute inset-0 rounded-full opacity-80" style={{ background: 'conic-gradient(from 0deg, #a855f7, #3b82f6, #06b6d4, #ec4899, #a855f7)', animation: 'orb-spin 4s linear infinite', filter: 'blur(4px)' }} />
+                <div className="absolute w-4 h-4 rounded-full bg-white/70" style={{ top: '20%', left: '25%', filter: 'blur(3px)', animation: 'orb-pulse 2.5s ease-in-out infinite' }} />
+              </div>
+            </div>
+            <div className="w-px h-7 sm:h-9 bg-white/30 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <input type="text" value={value} onChange={onChange} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+                placeholder={`${text}${typing ? '|' : ''}`}
+                className="w-full text-sm sm:text-base text-white placeholder-white/60 bg-transparent border-none outline-none font-normal" />
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Main App
+    function App() {
+      const [items, setItems] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [loadingMsg, setLoadingMsg] = useState('');
+      const [searchQuery, setSearchQuery] = useState('');
+      const [selectedCategory, setSelectedCategory] = useState('전체');
+      const [selectedSource, setSelectedSource] = useState('전체');
+      const [showKorean, setShowKorean] = useState(true);
+      const [bookmarks, setBookmarks] = useState(new Set());
+      const [summarizing, setSummarizing] = useState(new Set());
+      const [lastUpdated, setLastUpdated] = useState(new Date());
+
+      const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+
+      const newCounts = useMemo(() => {
+        const c = {};
+        Object.keys(CATEGORIES).forEach(cat => { c[cat] = items.filter(i => i.category === cat && i.isNew).length; });
+        c['전체'] = items.filter(i => i.isNew).length;
+        return c;
+      }, [items]);
+
+      const fetchAll = async () => {
+        setLoading(true);
+        setLoadingMsg('Hacker News · arXiv · HuggingFace에서 수집 중...');
+        try {
+          const [hn, ax, hf] = await Promise.all([
+            fetch(`${API_BASE}/api/hackernews`).then(r => r.json()).catch(e => ({ success: false, error: e.message, data: [] })),
+            fetch(`${API_BASE}/api/arxiv`).then(r => r.json()).catch(e => ({ success: false, error: e.message, data: [] })),
+            fetch(`${API_BASE}/api/huggingface`).then(r => r.json()).catch(e => ({ success: false, error: e.message, data: [] })),
+          ]);
+          const combined = [...(hn.data || []), ...(ax.data || []), ...(hf.data || [])];
+          const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+          const enriched = combined.map(i => ({
+            ...i,
+            category: categorizeItem(i.title, i.originalText || ''),
+            isNew: new Date(i.date).getTime() >= today0.getTime(),
+          }));
+          enriched.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setItems(enriched);
+          setLastUpdated(new Date());
+          if (enriched.length > 0) {
+            setLoadingMsg(`✅ 수집 완료 (${enriched.length}개): HN ${hn.data?.length || 0} · arXiv ${ax.data?.length || 0} · HF ${hf.data?.length || 0}`);
+            setTimeout(() => { setLoading(false); setLoadingMsg(''); }, 2500);
+          } else {
+            setLoadingMsg(`❌ 수집 실패 - HN: ${hn.error || 'ok'}, arXiv: ${ax.error || 'ok'}, HF: ${hf.error || 'ok'}`);
+          }
+        } catch (err) {
+          setLoadingMsg('❌ 에러: ' + err.message);
+        }
+      };
+
+      const summarize = async (item) => {
+        if (item.summaryKo) return;
+        setSummarizing(p => new Set([...p, item.id]));
+        try {
+          const r = await fetch(`${API_BASE}/api/summarize`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: item.title, content: item.originalText || item.title }),
+          });
+          const d = await r.json();
+          if (d.success) {
+            setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: d.summary, category: d.category || i.category } : i));
+          } else {
+            setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: '요약 실패: ' + (d.error || 'unknown') } : i));
+          }
+        } catch (e) {
+          setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: '요약 실패' } : i));
+        } finally {
+          setSummarizing(p => { const s = new Set(p); s.delete(item.id); return s; });
+        }
+      };
+
+      const toggleBookmark = (id) => {
+        setBookmarks(p => { const s = new Set(p); if (s.has(id)) s.delete(id); else s.add(id); return s; });
+      };
+
+      const filtered = useMemo(() => {
+        return items.filter(item => {
+          if (selectedCategory !== '전체' && item.category !== selectedCategory) return false;
+          if (selectedSource !== '전체' && item.source !== selectedSource) return false;
+          if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            if (!item.title.toLowerCase().includes(q) && !(item.originalText || '').toLowerCase().includes(q) && !(item.summaryKo || '').toLowerCase().includes(q)) return false;
+          }
+          return true;
+        });
+      }, [items, selectedCategory, selectedSource, searchQuery]);
+
+      const formatTime = (s) => {
+        const diff = Date.now() - new Date(s).getTime();
+        const h = Math.floor(diff / 3600000);
+        const d = Math.floor(h / 24);
+        if (d > 0) return `${d}일 전`;
+        if (h > 0) return `${h}시간 전`;
+        const m = Math.floor(diff / 60000);
+        if (m > 0) return `${m}분 전`;
+        return '방금 전';
+      };
+
+      const formatDate = (s) => {
+        const d = new Date(s);
+        return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+      };
+
+      useEffect(() => { fetchAll(); }, []);
+
+      return (
+        <div className="relative min-h-screen w-full text-white bg-neutral-950">
+          <BeamsBackground />
+          <div className="relative" style={{ zIndex: 10 }}>
+            {/* Header */}
+            <div className="sticky top-0 z-20 bg-neutral-950/85 backdrop-blur-xl border-b border-white/15">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-end gap-2">
+                <button onClick={() => setShowKorean(!showKorean)} className={`px-3 py-2 rounded-lg text-sm flex items-center gap-1.5 font-semibold ${showKorean ? 'bg-blue-500/25 text-blue-200 ring-1 ring-blue-400/40' : 'bg-white/10 text-white/80 border border-white/15'}`}>
+                  <Icon name="languages" size={16} /><span className="hidden sm:inline">{showKorean ? '한국어' : 'Original'}</span>
+                </button>
+                <button onClick={fetchAll} disabled={loading} className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-sm font-semibold flex items-center gap-1.5 shadow-lg">
+                  <Icon name="refresh-cw" size={16} className={loading ? 'animate-spin' : ''} /><span className="hidden sm:inline">새로고침</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Hero */}
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-10 sm:pt-14 pb-8">
+              <div className="text-center mb-10">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 mb-5">
+                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                  <span className="text-xs font-semibold tracking-wider text-white uppercase">LIVE</span>
+                  <span className="text-xs text-white/70">{today}</span>
+                </div>
+                <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white mb-4 tracking-tight">
+                  AI News <span className="bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">Radar</span>
+                </h1>
+                <p className="text-base sm:text-lg text-white/80 max-w-2xl mx-auto">
+                  Hacker News · arXiv · HuggingFace에서 수집된 최신 AI 기술을 카테고리별로 정리해드려요.
+                  <br className="hidden sm:block" />
+                  오늘 <span className="font-bold text-white">{newCounts['전체']}건</span>의 새로운 업데이트가 있어요.
+                </p>
+              </div>
+
+              {/* Category Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '12px' }}>
+                {Object.keys(CATEGORIES).map(cat => {
+                  const s = CATEGORIES[cat];
+                  const sh = CATEGORY_SHADERS[cat];
+                  const count = newCounts[cat] || 0;
+                  return (
+                    <div key={cat} className="relative h-36 sm:h-40 rounded-2xl overflow-hidden">
+                      <div className="absolute inset-0 rounded-2xl overflow-hidden"><WarpShader colors={sh.colors} shape={sh.shape} speed={0.8} /></div>
+                      <div className="absolute inset-0 bg-black/45" />
+                      <div className="relative h-full p-3.5 flex flex-col justify-between">
+                        <div className="flex items-start justify-between">
+                          <div className="p-2 rounded-lg bg-white/15 border border-white/20">
+                            <Icon name={s.iconName} size={24} strokeWidth={1.8} className="text-white drop-shadow-lg" />
+                          </div>
+                          {count > 0 && <div className="px-1.5 py-0.5 bg-red-500 rounded-full text-[9px] font-bold text-white shadow-lg">NEW</div>}
+                        </div>
+                        <div className="flex items-end justify-between gap-2">
+                          <h3 className="text-base sm:text-lg font-extrabold text-white drop-shadow-lg min-w-0 truncate">{cat}</h3>
+                          <div className="text-4xl font-black text-white leading-none drop-shadow-lg tabular-nums flex-shrink-0">{count}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Search */}
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 mb-8">
+              <OrbInput value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+            </div>
+
+            {/* Filters */}
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 mb-8">
+              <div className="mb-5">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-3">카테고리</h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button onClick={() => setSelectedCategory('전체')} className={`px-4 py-2 rounded-full text-xs font-bold uppercase ${selectedCategory === '전체' ? 'bg-white text-neutral-900' : 'bg-white/10 text-white border border-white/20'}`}>All</button>
+                  {Object.keys(CATEGORIES).map(cat => {
+                    const s = CATEGORIES[cat];
+                    const sel = selectedCategory === cat;
+                    return (
+                      <button key={cat} onClick={() => setSelectedCategory(cat)}
+                        style={{ background: sel ? `linear-gradient(45deg, ${s.gradientFrom}, ${s.gradientTo})` : 'rgba(255,255,255,0.08)' }}
+                        className={`px-4 py-2 rounded-full text-xs font-bold uppercase flex items-center gap-1.5 text-white ${!sel && 'border border-white/15'}`}>
+                        <Icon name={s.iconName} size={14} />{cat}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-3">소스</h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button onClick={() => setSelectedSource('전체')} className={`px-3 py-1.5 rounded-full text-xs font-semibold ${selectedSource === '전체' ? 'bg-white text-neutral-900' : 'bg-white/10 border border-white/20 text-white'}`}>전체</button>
+                  {Object.keys(SOURCES).map(src => (
+                    <button key={src} onClick={() => setSelectedSource(src)} className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 ${selectedSource === src ? `${SOURCES[src].bg} ${SOURCES[src].color} ring-1 ring-current` : 'bg-white/10 border border-white/20 text-white/80'}`}>
+                      <span className="font-mono font-bold">{SOURCES[src].icon}</span>{src}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Loading */}
+            {loading && (
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+                <div className="flex items-center gap-3 p-4 bg-blue-500/15 border border-blue-400/40 rounded-xl">
+                  <Icon name="loader-2" size={20} className="text-blue-200 animate-spin" />
+                  <span className="text-sm text-blue-100 font-medium">{loadingMsg}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Content */}
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+              <div className="mb-5 flex items-center justify-between pb-3 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-lg font-bold">{selectedCategory === '전체' ? '전체' : selectedCategory}</h3>
+                  <span className="text-sm text-white/60">{filtered.length}개</span>
+                </div>
+                <span className="text-xs text-white/50">💡 카드 hover → 영어 원문</span>
+              </div>
+
+              {filtered.length === 0 && !loading ? (
+                <div className="text-center py-20 text-white/60">조건에 맞는 글이 없습니다</div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '20px' }}>
+                  {filtered.map(item => {
+                    const cs = CATEGORIES[item.category] || CATEGORIES['기타'];
+                    const ss = SOURCES[item.source];
+                    const bookmarked = bookmarks.has(item.id);
+                    const summarizing_ = summarizing.has(item.id);
+
+                    const front = (
+                      <div className="h-full w-full bg-neutral-900/95 backdrop-blur-xl border border-white/15 rounded-2xl flex flex-col">
+                        <div className="relative flex-shrink-0">
+                          <CategoryThumbnail category={item.category} />
+                          {item.isNew && <div className="absolute top-3 right-3 px-2 py-0.5 bg-red-500 rounded-full text-[10px] font-bold text-white shadow-lg">NEW</div>}
+                          <button onClick={(e) => { e.stopPropagation(); toggleBookmark(item.id); }}
+                            className={`absolute bottom-3 right-3 w-8 h-8 rounded-full flex items-center justify-center backdrop-blur ${bookmarked ? 'bg-yellow-400 text-white' : 'bg-black/40 text-white'}`}>
+                            <Icon name="star" size={16} className={bookmarked ? 'fill-current' : ''} />
+                          </button>
+                        </div>
+                        <div className="p-4 flex-1 flex flex-col min-h-0">
+                          <div className="flex items-center gap-1.5 mb-3 text-[11px] flex-wrap">
+                            <span className={`inline-flex items-center gap-1 font-semibold ${ss.color}`}>
+                              <span className="font-mono font-bold">{ss.icon}</span>{item.source}
+                            </span>
+                            <Icon name="chevron-right" size={12} className="text-white/40" />
+                            <span className={`inline-flex items-center gap-1 font-semibold ${cs.text}`}>
+                              <Icon name={cs.iconName} size={12} />{item.category}
+                            </span>
+                            <Icon name="chevron-right" size={12} className="text-white/40" />
+                            <span className="inline-flex items-center gap-1 text-white/80 tabular-nums font-medium">
+                              <Icon name="calendar" size={12} />{formatDate(item.date)}
+                            </span>
+                          </div>
+                          <div className="flex-1 overflow-hidden">
+                            {item.summaryKo ? (
+                              <p className="text-sm text-white leading-relaxed line-clamp-5">{item.summaryKo}</p>
+                            ) : (
+                              <div className="space-y-2">
+                                <p className="text-sm text-white line-clamp-2 font-semibold">{item.title}</p>
+                                <button onClick={(e) => { e.stopPropagation(); summarize(item); }} disabled={summarizing_}
+                                  className="text-xs px-3 py-1.5 bg-white/15 rounded-lg flex items-center gap-2 text-white font-medium">
+                                  <Icon name={summarizing_ ? 'loader-2' : 'languages'} size={12} className={summarizing_ ? 'animate-spin' : ''} />
+                                  {summarizing_ ? '요약 중...' : '한국어 요약 생성'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between pt-3 mt-3 border-t border-white/15 text-xs text-white/70">
+                            <div className="flex items-center gap-3">
+                              <span>{formatTime(item.date)}</span>
+                              {item.score > 0 && <span className="flex items-center gap-1 font-semibold"><Icon name="trending-up" size={12} />{item.score}</span>}
+                              {item.comments > 0 && <span>💬 {item.comments}</span>}
+                            </div>
+                            <span className="text-[10px] text-white/50 italic">hover →</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+
+                    const back = (
+                      <div className={`h-full w-full rounded-2xl flex flex-col bg-gradient-to-br ${cs.gradient} relative`}>
+                        <div className="absolute inset-0 bg-neutral-950/92" />
+                        <div className="relative p-5 flex flex-col h-full" style={{ zIndex: 10 }}>
+                          <div className="flex items-center gap-1.5 mb-3 text-[11px]">
+                            <span className={`inline-flex items-center gap-1 font-semibold ${cs.text}`}><Icon name={cs.iconName} size={12} />{item.category}</span>
+                            <Icon name="chevron-right" size={12} className="text-white/40" />
+                            <span className="inline-flex items-center gap-1 text-white/80 tabular-nums font-medium"><Icon name="calendar" size={12} />{formatDate(item.date)}</span>
+                          </div>
+                          <h3 className="text-sm font-bold text-white leading-snug mb-3 line-clamp-2">{item.title}</h3>
+                          <div className="flex-1 overflow-hidden"><p className="text-xs text-white/90 leading-relaxed line-clamp-2">{item.originalText || item.title}</p></div>
+                          <a href={item.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                            className="mt-4 inline-flex items-center justify-center gap-1.5 text-xs font-bold text-white bg-white/20 py-2.5 rounded-lg border border-white/25">
+                            원본 보기<Icon name="external-link" size={12} />
+                          </a>
+                        </div>
+                      </div>
+                    );
+
+                    return <FlippingCard key={item.id} front={front} back={back} />;
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 text-center text-xs text-white/50">
+              AI News Radar · Hacker News + arXiv + HuggingFace 통합
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
