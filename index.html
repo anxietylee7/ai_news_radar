@@ -377,6 +377,14 @@
         return c;
       }, [items]);
 
+      // 카테고리별 전체 개수 (NEW가 아닌 것 포함)
+      const totalCounts = useMemo(() => {
+        const c = {};
+        Object.keys(CATEGORIES).forEach(cat => { c[cat] = items.filter(i => i.category === cat).length; });
+        c['전체'] = items.length;
+        return c;
+      }, [items]);
+
       const fetchAll = async () => {
         setLoading(true);
         setLoadingMsg('Hacker News · arXiv · HuggingFace에서 수집 중...');
@@ -534,9 +542,8 @@
                 <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white mb-4 tracking-tight">
                   AI News <span className="bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">Radar</span>
                 </h1>
-                <p className="text-base sm:text-lg text-white/80 max-w-2xl mx-auto">
-                  Hacker News · arXiv · HuggingFace에서 수집된 최신 AI 기술을 카테고리별로 정리해드려요.
-                  <br className="hidden sm:block" />
+                <p className="text-base sm:text-lg text-white/80 max-w-3xl mx-auto leading-relaxed">
+                  Hacker News · arXiv · HuggingFace에서 수집된 최신 AI 기술을 카테고리별로 정리해드려요.<br />
                   오늘 <span className="font-bold text-white">{newCounts['전체']}건</span>의 새로운 업데이트가 있어요.
                 </p>
               </div>
@@ -579,15 +586,21 @@
               <div className="mb-5">
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-3">카테고리</h3>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <button onClick={() => setSelectedCategory('전체')} className={`px-4 py-2 rounded-full text-xs font-bold uppercase ${selectedCategory === '전체' ? 'bg-white text-neutral-900' : 'bg-white/10 text-white border border-white/20'}`}>All</button>
+                  <button onClick={() => setSelectedCategory('전체')} className={`px-4 py-2 rounded-full text-xs font-bold uppercase flex items-center gap-2 ${selectedCategory === '전체' ? 'bg-white text-neutral-900' : 'bg-white/10 text-white border border-white/20'}`}>
+                    All
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${selectedCategory === '전체' ? 'bg-neutral-900/20 text-neutral-900' : 'bg-white/20 text-white/80'}`}>{totalCounts['전체']}</span>
+                  </button>
                   {Object.keys(CATEGORIES).map(cat => {
                     const s = CATEGORIES[cat];
                     const sel = selectedCategory === cat;
+                    const count = totalCounts[cat] || 0;
                     return (
                       <button key={cat} onClick={() => setSelectedCategory(cat)}
                         style={{ background: sel ? `linear-gradient(45deg, ${s.gradientFrom}, ${s.gradientTo})` : 'rgba(255,255,255,0.08)' }}
-                        className={`px-4 py-2 rounded-full text-xs font-bold uppercase flex items-center gap-1.5 text-white ${!sel && 'border border-white/15'}`}>
-                        <Icon name={s.iconName} size={14} />{cat}
+                        className={`px-4 py-2 rounded-full text-xs font-bold uppercase flex items-center gap-2 text-white ${!sel && 'border border-white/15'}`}>
+                        <Icon name={s.iconName} size={14} />
+                        {cat}
+                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${sel ? 'bg-white/25' : 'bg-white/15'}`}>{count}</span>
                       </button>
                     );
                   })}
@@ -596,12 +609,20 @@
               <div>
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-3">소스</h3>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <button onClick={() => setSelectedSource('전체')} className={`px-3 py-1.5 rounded-full text-xs font-semibold ${selectedSource === '전체' ? 'bg-white text-neutral-900' : 'bg-white/10 border border-white/20 text-white'}`}>전체</button>
-                  {Object.keys(SOURCES).map(src => (
-                    <button key={src} onClick={() => setSelectedSource(src)} className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 ${selectedSource === src ? `${SOURCES[src].bg} ${SOURCES[src].color} ring-1 ring-current` : 'bg-white/10 border border-white/20 text-white/80'}`}>
-                      <span className="font-mono font-bold">{SOURCES[src].icon}</span>{src}
-                    </button>
-                  ))}
+                  <button onClick={() => setSelectedSource('전체')} className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-2 ${selectedSource === '전체' ? 'bg-white text-neutral-900' : 'bg-white/10 border border-white/20 text-white'}`}>
+                    전체
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${selectedSource === '전체' ? 'bg-neutral-900/20' : 'bg-white/20'}`}>{items.length}</span>
+                  </button>
+                  {Object.keys(SOURCES).map(src => {
+                    const count = items.filter(i => i.source === src).length;
+                    return (
+                      <button key={src} onClick={() => setSelectedSource(src)} className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-2 ${selectedSource === src ? `${SOURCES[src].bg} ${SOURCES[src].color} ring-1 ring-current` : 'bg-white/10 border border-white/20 text-white/80'}`}>
+                        <span className="font-mono font-bold">{SOURCES[src].icon}</span>
+                        {src}
+                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${selectedSource === src ? 'bg-current/20' : 'bg-white/15'}`} style={selectedSource === src ? {} : { color: 'rgba(255,255,255,0.7)' }}>{count}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
