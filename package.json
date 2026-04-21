@@ -4,6 +4,7 @@
   "description": "AI News Radar - Real-time AI tech news dashboard",
   "type": "module",
   "dependencies": {
-    "openai": "^4.77.0"
+    "openai": "^4.77.0",
+    "@vercel/kv": "^3.0.0"
   }
 }
