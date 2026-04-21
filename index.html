@@ -396,8 +396,53 @@
           enriched.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           setItems(enriched);
           setLastUpdated(new Date());
+          
           if (enriched.length > 0) {
-            setLoadingMsg(`✅ 수집 완료 (${enriched.length}개): HN ${hn.data?.length || 0} · arXiv ${ax.data?.length || 0} · HF ${hf.data?.length || 0}`);
+            setLoadingMsg(`✅ ${enriched.length}개 수집 완료. GPT-4o로 한국어 요약 + 카테고리 분류 시작...`);
+            
+            // 병렬로 요약 요청 (동시 요청 수 제한: 5개)
+            const CONCURRENCY = 5;
+            const items_ = [...enriched];
+            let completed = 0;
+            const total = items_.length;
+            
+            const processNext = async () => {
+              while (items_.length > 0) {
+                const item = items_.shift();
+                if (!item) break;
+                
+                try {
+                  const r = await fetch(`${API_BASE}/api/summarize`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                      title: item.title, 
+                      content: item.originalText || item.title 
+                    }),
+                  });
+                  const d = await r.json();
+                  
+                  if (d.success) {
+                    setItems(prev => prev.map(i => 
+                      i.id === item.id 
+                        ? { ...i, summaryKo: d.summary, category: d.category || i.category } 
+                        : i
+                    ));
+                  }
+                } catch (e) {
+                  console.error('Summary error for', item.id, e);
+                }
+                
+                completed++;
+                setLoadingMsg(`🤖 GPT-4o 요약 진행 중... ${completed}/${total}`);
+              }
+            };
+            
+            // 여러 워커가 동시에 처리
+            const workers = Array.from({ length: CONCURRENCY }, () => processNext());
+            await Promise.all(workers);
+            
+            setLoadingMsg(`✨ 모든 요약 완료! (${total}개)`);
             setTimeout(() => { setLoading(false); setLoadingMsg(''); }, 2500);
           } else {
             setLoadingMsg(`❌ 수집 실패 - HN: ${hn.error || 'ok'}, arXiv: ${ax.error || 'ok'}, HF: ${hf.error || 'ok'}`);
