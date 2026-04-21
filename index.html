@@ -269,11 +269,12 @@
     };
 
     // Flipping Card
-    const FlippingCard = ({ front, back }) => {
+    const FlippingCard = ({ front, back, disabled = false }) => {
       const [flipped, setFlipped] = useState(false);
       return (
         <div className="relative w-full" style={{ perspective: '1200px', height: '360px' }}
-          onMouseEnter={() => setFlipped(true)} onMouseLeave={() => setFlipped(false)}>
+          onMouseEnter={() => !disabled && setFlipped(true)} 
+          onMouseLeave={() => !disabled && setFlipped(false)}>
           <div className="relative w-full h-full transition-transform duration-700"
             style={{ transformStyle: 'preserve-3d', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
             <div className="absolute inset-0 w-full h-full rounded-2xl overflow-hidden"
@@ -369,6 +370,7 @@
       const [lastUpdated, setLastUpdated] = useState(new Date());
 
       const [showTodayOnly, setShowTodayOnly] = useState(false);
+      const [sortBy, setSortBy] = useState('date'); // 'date' | 'popularity'
       const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
 
       const newCounts = useMemo(() => {
@@ -385,6 +387,38 @@
         c['전체'] = items.length;
         return c;
       }, [items]);
+
+      // 단일 아이템 요약 (재시도 포함)
+      const summarizeItemWithRetry = async (item, maxRetries = 3) => {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            const r = await fetch(`${API_BASE}/api/summarize`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                title: item.title, 
+                content: item.originalText || item.title 
+              }),
+            });
+            const d = await r.json();
+            
+            if (d.success && d.summary) {
+              return { success: true, summary: d.summary, category: d.category };
+            }
+            
+            // 실패 시 대기 후 재시도 (exponential backoff)
+            if (attempt < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+            }
+          } catch (e) {
+            console.error(`Attempt ${attempt} failed for ${item.id}:`, e);
+            if (attempt < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+            }
+          }
+        }
+        return { success: false };
+      };
 
       const fetchAll = async () => {
         setLoading(true);
@@ -409,10 +443,11 @@
           if (enriched.length > 0) {
             setLoadingMsg(`✅ ${enriched.length}개 수집 완료. GPT-4o로 한국어 요약 + 카테고리 분류 시작...`);
             
-            // 병렬로 요약 요청 (동시 요청 수 제한: 5개)
-            const CONCURRENCY = 5;
+            // 병렬로 요약 요청 (동시 3개, 재시도 포함)
+            const CONCURRENCY = 3;
             const items_ = [...enriched];
             let completed = 0;
+            let failed = 0;
             const total = items_.length;
             
             const processNext = async () => {
@@ -420,30 +455,23 @@
                 const item = items_.shift();
                 if (!item) break;
                 
-                try {
-                  const r = await fetch(`${API_BASE}/api/summarize`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                      title: item.title, 
-                      content: item.originalText || item.title 
-                    }),
-                  });
-                  const d = await r.json();
-                  
-                  if (d.success) {
-                    setItems(prev => prev.map(i => 
-                      i.id === item.id 
-                        ? { ...i, summaryKo: d.summary, category: d.category || i.category } 
-                        : i
-                    ));
-                  }
-                } catch (e) {
-                  console.error('Summary error for', item.id, e);
+                const result = await summarizeItemWithRetry(item);
+                
+                if (result.success) {
+                  setItems(prev => prev.map(i => 
+                    i.id === item.id 
+                      ? { ...i, summaryKo: result.summary, category: result.category || i.category } 
+                      : i
+                  ));
+                } else {
+                  failed++;
                 }
                 
                 completed++;
-                setLoadingMsg(`🤖 GPT-4o 요약 진행 중... ${completed}/${total}`);
+                setLoadingMsg(`🤖 GPT-4o 요약 진행 중... ${completed}/${total} ${failed > 0 ? `(실패: ${failed})` : ''}`);
+                
+                // 요청 간 간격 (rate limit 방지)
+                await new Promise(resolve => setTimeout(resolve, 300));
               }
             };
             
@@ -451,8 +479,12 @@
             const workers = Array.from({ length: CONCURRENCY }, () => processNext());
             await Promise.all(workers);
             
-            setLoadingMsg(`✨ 모든 요약 완료! (${total}개)`);
-            setTimeout(() => { setLoading(false); setLoadingMsg(''); }, 2500);
+            if (failed === 0) {
+              setLoadingMsg(`✨ 모든 요약 완료! (${total}개)`);
+            } else {
+              setLoadingMsg(`⚠️ 완료: ${total - failed}/${total} · 실패한 ${failed}개는 카드에서 수동 재시도 가능`);
+            }
+            setTimeout(() => { setLoading(false); setLoadingMsg(''); }, 3500);
           } else {
             setLoadingMsg(`❌ 수집 실패 - HN: ${hn.error || 'ok'}, arXiv: ${ax.error || 'ok'}, HF: ${hf.error || 'ok'}`);
           }
@@ -461,25 +493,17 @@
         }
       };
 
+      // 수동 요약 (카드에서 버튼 클릭 시)
       const summarize = async (item) => {
         if (item.summaryKo) return;
         setSummarizing(p => new Set([...p, item.id]));
-        try {
-          const r = await fetch(`${API_BASE}/api/summarize`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: item.title, content: item.originalText || item.title }),
-          });
-          const d = await r.json();
-          if (d.success) {
-            setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: d.summary, category: d.category || i.category } : i));
-          } else {
-            setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: '요약 실패: ' + (d.error || 'unknown') } : i));
-          }
-        } catch (e) {
-          setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: '요약 실패' } : i));
-        } finally {
-          setSummarizing(p => { const s = new Set(p); s.delete(item.id); return s; });
+        const result = await summarizeItemWithRetry(item);
+        if (result.success) {
+          setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: result.summary, category: result.category || i.category } : i));
+        } else {
+          setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: '❌ 요약 실패. 다시 시도해주세요.' } : i));
         }
+        setSummarizing(p => { const s = new Set(p); s.delete(item.id); return s; });
       };
 
       const toggleBookmark = (id) => {
@@ -487,7 +511,7 @@
       };
 
       const filtered = useMemo(() => {
-        return items.filter(item => {
+        const result = items.filter(item => {
           if (selectedCategory !== '전체' && item.category !== selectedCategory) return false;
           if (selectedSource !== '전체' && item.source !== selectedSource) return false;
           if (showTodayOnly && !item.isNew) return false;
@@ -497,7 +521,18 @@
           }
           return true;
         });
-      }, [items, selectedCategory, selectedSource, searchQuery, showTodayOnly]);
+        
+        // 정렬
+        if (sortBy === 'popularity') {
+          // 인기순: score(HN) + score(HF). arXiv는 0.
+          result.sort((a, b) => (b.score || 0) - (a.score || 0));
+        } else {
+          // 최신순 (기본)
+          result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        }
+        
+        return result;
+      }, [items, selectedCategory, selectedSource, searchQuery, showTodayOnly, sortBy]);
 
       const formatTime = (s) => {
         const diff = Date.now() - new Date(s).getTime();
@@ -524,9 +559,6 @@
             {/* Header */}
             <div className="sticky top-0 z-20 bg-neutral-950/85 backdrop-blur-xl border-b border-white/15">
               <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-end gap-2">
-                <button onClick={() => setShowKorean(!showKorean)} className={`px-3 py-2 rounded-lg text-sm flex items-center gap-1.5 font-semibold ${showKorean ? 'bg-blue-500/25 text-blue-200 ring-1 ring-blue-400/40' : 'bg-white/10 text-white/80 border border-white/15'}`}>
-                  <Icon name="languages" size={16} /><span className="hidden sm:inline">{showKorean ? '한국어' : 'Original'}</span>
-                </button>
                 <button onClick={fetchAll} disabled={loading} className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-sm font-semibold flex items-center gap-1.5 shadow-lg">
                   <Icon name="refresh-cw" size={16} className={loading ? 'animate-spin' : ''} /><span className="hidden sm:inline">새로고침</span>
                 </button>
@@ -686,24 +718,60 @@
                     </button>
                   )}
                 </div>
-                <span className="text-xs text-white/50">💡 카드 hover → 영어 원문</span>
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* 정렬 토글 */}
+                  <div className="flex items-center gap-1 bg-white/5 border border-white/15 rounded-full p-1">
+                    <button
+                      onClick={() => setSortBy('date')}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1.5 ${
+                        sortBy === 'date' ? 'bg-white text-neutral-900' : 'text-white/70 hover:text-white'
+                      }`}
+                    >
+                      <Icon name="calendar" size={12} />
+                      최신순
+                    </button>
+                    <button
+                      onClick={() => setSortBy('popularity')}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1.5 ${
+                        sortBy === 'popularity' ? 'bg-white text-neutral-900' : 'text-white/70 hover:text-white'
+                      }`}
+                    >
+                      <Icon name="trending-up" size={12} />
+                      인기순
+                    </button>
+                  </div>
+                  <span className="text-xs text-white/50 hidden sm:inline">💡 카드 hover → 영어 원문 보기</span>
+                </div>
               </div>
 
               {filtered.length === 0 && !loading ? (
                 <div className="text-center py-20 text-white/60">조건에 맞는 글이 없습니다</div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '20px' }}>
-                  {filtered.map(item => {
+                  {filtered.map((item, idx) => {
                     const cs = CATEGORIES[item.category] || CATEGORIES['기타'];
                     const ss = SOURCES[item.source];
                     const bookmarked = bookmarks.has(item.id);
                     const summarizing_ = summarizing.has(item.id);
+                    const showRank = sortBy === 'popularity' && idx < 3 && item.score > 0;
+                    // 요약이 없거나 실패 메시지면 flip 비활성화
+                    const hasSummary = item.summaryKo && !item.summaryKo.startsWith('❌');
+                    const cardDisabled = !hasSummary;
 
                     const front = (
                       <div className="h-full w-full bg-neutral-900/95 backdrop-blur-xl border border-white/15 rounded-2xl flex flex-col">
                         <div className="relative flex-shrink-0">
                           <CategoryThumbnail category={item.category} />
                           {item.isNew && <div className="absolute top-3 right-3 px-2 py-0.5 bg-red-500 rounded-full text-[10px] font-bold text-white shadow-lg">NEW</div>}
+                          {showRank && (
+                            <div className={`absolute top-3 left-3 w-8 h-8 rounded-full flex items-center justify-center font-black text-sm shadow-lg ${
+                              idx === 0 ? 'bg-yellow-400 text-yellow-900' :
+                              idx === 1 ? 'bg-gray-300 text-gray-800' :
+                              'bg-orange-400 text-orange-900'
+                            }`}>
+                              {idx + 1}
+                            </div>
+                          )}
                           <button onClick={(e) => { e.stopPropagation(); toggleBookmark(item.id); }}
                             className={`absolute bottom-3 right-3 w-8 h-8 rounded-full flex items-center justify-center backdrop-blur ${bookmarked ? 'bg-yellow-400 text-white' : 'bg-black/40 text-white'}`}>
                             <Icon name="star" size={16} className={bookmarked ? 'fill-current' : ''} />
@@ -740,10 +808,18 @@
                           <div className="flex items-center justify-between pt-3 mt-3 border-t border-white/15 text-xs text-white/70">
                             <div className="flex items-center gap-3">
                               <span>{formatTime(item.date)}</span>
-                              {item.score > 0 && <span className="flex items-center gap-1 font-semibold"><Icon name="trending-up" size={12} />{item.score}</span>}
+                              {item.score > 0 && (
+                                <span className={`flex items-center gap-1 font-semibold ${sortBy === 'popularity' ? 'text-yellow-300' : ''}`}>
+                                  <Icon name="trending-up" size={12} />{item.score.toLocaleString()}
+                                </span>
+                              )}
                               {item.comments > 0 && <span>💬 {item.comments}</span>}
                             </div>
-                            <span className="text-[10px] text-white/50 italic">hover →</span>
+                            {hasSummary ? (
+                              <span className="text-[10px] text-white/50 italic">hover →</span>
+                            ) : (
+                              <span className="text-[10px] text-yellow-400/80 italic">요약 대기 중</span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -768,7 +844,7 @@
                       </div>
                     );
 
-                    return <FlippingCard key={item.id} front={front} back={back} />;
+                    return <FlippingCard key={item.id} front={front} back={back} disabled={cardDisabled} />;
                   })}
                 </div>
               )}
