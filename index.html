@@ -403,10 +403,14 @@
             const d = await r.json();
             
             if (d.success && d.summary) {
-              return { success: true, summary: d.summary, category: d.category };
+              return { 
+                success: true, 
+                summary: d.summary, 
+                category: d.category,
+                isAIRelated: d.isAIRelated !== false
+              };
             }
             
-            // 실패 시 대기 후 재시도 (exponential backoff)
             if (attempt < maxRetries) {
               await new Promise(resolve => setTimeout(resolve, attempt * 1500));
             }
@@ -435,19 +439,20 @@
             ...i,
             category: categorizeItem(i.title, i.originalText || ''),
             isNew: new Date(i.date).getTime() >= today0.getTime(),
+            isAIRelated: true, // 기본 true, GPT가 판단 후 업데이트
           }));
           enriched.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           setItems(enriched);
           setLastUpdated(new Date());
           
           if (enriched.length > 0) {
-            setLoadingMsg(`✅ ${enriched.length}개 수집 완료. GPT-4o로 한국어 요약 + 카테고리 분류 시작...`);
+            setLoadingMsg(`✅ ${enriched.length}개 수집 완료. GPT-4o로 요약 + AI 관련성 판단 시작...`);
             
-            // 병렬로 요약 요청 (동시 3개, 재시도 포함)
             const CONCURRENCY = 3;
             const items_ = [...enriched];
             let completed = 0;
             let failed = 0;
+            let filtered_out = 0;
             const total = items_.length;
             
             const processNext = async () => {
@@ -458,31 +463,40 @@
                 const result = await summarizeItemWithRetry(item);
                 
                 if (result.success) {
-                  setItems(prev => prev.map(i => 
-                    i.id === item.id 
-                      ? { ...i, summaryKo: result.summary, category: result.category || i.category } 
-                      : i
-                  ));
+                  if (result.isAIRelated === false) {
+                    // AI 무관 글은 items에서 제거
+                    setItems(prev => prev.filter(i => i.id !== item.id));
+                    filtered_out++;
+                  } else {
+                    setItems(prev => prev.map(i => 
+                      i.id === item.id 
+                        ? { ...i, summaryKo: result.summary, category: result.category || i.category, isAIRelated: true } 
+                        : i
+                    ));
+                  }
                 } else {
                   failed++;
                 }
                 
                 completed++;
-                setLoadingMsg(`🤖 GPT-4o 요약 진행 중... ${completed}/${total} ${failed > 0 ? `(실패: ${failed})` : ''}`);
+                const statusParts = [];
+                if (filtered_out > 0) statusParts.push(`AI 무관 ${filtered_out}개 제외`);
+                if (failed > 0) statusParts.push(`실패 ${failed}개`);
+                const status = statusParts.length ? ` (${statusParts.join(', ')})` : '';
+                setLoadingMsg(`🤖 GPT-4o 처리 중... ${completed}/${total}${status}`);
                 
-                // 요청 간 간격 (rate limit 방지)
                 await new Promise(resolve => setTimeout(resolve, 300));
               }
             };
             
-            // 여러 워커가 동시에 처리
             const workers = Array.from({ length: CONCURRENCY }, () => processNext());
             await Promise.all(workers);
             
+            const successCount = total - failed - filtered_out;
             if (failed === 0) {
-              setLoadingMsg(`✨ 모든 요약 완료! (${total}개)`);
+              setLoadingMsg(`✨ 완료! AI 관련 ${successCount}개 ${filtered_out > 0 ? `(AI 무관 ${filtered_out}개 자동 제외)` : ''}`);
             } else {
-              setLoadingMsg(`⚠️ 완료: ${total - failed}/${total} · 실패한 ${failed}개는 카드에서 수동 재시도 가능`);
+              setLoadingMsg(`⚠️ 완료: ${successCount}/${total} ${filtered_out > 0 ? `· AI 무관 ${filtered_out}개 제외` : ''} · 실패 ${failed}개`);
             }
             setTimeout(() => { setLoading(false); setLoadingMsg(''); }, 3500);
           } else {
@@ -499,7 +513,12 @@
         setSummarizing(p => new Set([...p, item.id]));
         const result = await summarizeItemWithRetry(item);
         if (result.success) {
-          setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: result.summary, category: result.category || i.category } : i));
+          if (result.isAIRelated === false) {
+            // AI 무관 글은 제거
+            setItems(p => p.filter(i => i.id !== item.id));
+          } else {
+            setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: result.summary, category: result.category || i.category, isAIRelated: true } : i));
+          }
         } else {
           setItems(p => p.map(i => i.id === item.id ? { ...i, summaryKo: '❌ 요약 실패. 다시 시도해주세요.' } : i));
         }
