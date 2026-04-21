@@ -1,19 +1,66 @@
-// api/hackernews.js - Hacker News에서 AI 관련 글 가져오기
+// api/hackernews.js - Hacker News에서 AI 관련 글 가져오기 (정규식 필터링)
 
-const AI_KEYWORDS = [
-  'ai', 'llm', 'gpt', 'claude', 'gemini', 'llama', 'mistral', 'anthropic', 'openai',
-  'neural', 'transformer', 'diffusion', 'stable diffusion', 'midjourney', 'dalle',
-  'machine learning', 'deep learning', 'vision', 'tts', 'speech', 'agent',
-  'multimodal', 'rag', 'embedding', 'fine-tun', 'model', 'inference', 'prompt',
-  'chatgpt', 'copilot', 'huggingface', 'langchain', 'ollama', 'sora', 'whisper'
+// 긴 키워드 (단어 안에 포함돼도 OK - includes 방식)
+const AI_CONTAINS_KEYWORDS = [
+  'openai', 'anthropic', 'chatgpt', 'claude', 'huggingface', 'langchain',
+  'llama', 'mistral', 'gemini', 'grok', 'qwen', 'deepseek',
+  'midjourney', 'stable diffusion', 'dall-e', 'dalle',
+  'elevenlabs', 'whisper', 'ollama', 'copilot',
+  'machine learning', 'deep learning', 'neural network',
+  'transformer', 'diffusion model', 'fine-tun', 'embedding',
+  'autogpt', 'crewai', 'langgraph', 'llamaindex',
+  'multimodal', 'vision-language', 'rag system',
+  'text-to-image', 'text-to-video', 'speech recognition', 'speech synthesis',
+];
+
+// 짧은 키워드 (단어 경계 체크 - 정규식 \b 사용)
+const AI_WORD_KEYWORDS = [
+  'ai', 'llm', 'gpt', 'tts', 'stt', 'asr', 'vlm', 'mllm', 'sora',
+  'agi', 'asi', 'rag', 'moe', 'nlp', 'cv', 'gan', 'vae',
+  'prompt', 'token', 'agent', 'agentic', 'inference',
+];
+
+// 제외 키워드 (false positive 방지)
+const EXCLUDE_KEYWORDS = [
+  'aim', 'aid', 'aids', 'air', 'airplane', 'airport', 'aircraft',
+  'aisle', 'tail', 'fail', 'email', 'retail', 'detail', 'available',
+  'contain', 'explain', 'maintain', 'brain', 'train', 'rain',
+  'bonsai', 'samurai', 'tokai', 'sensei',
 ];
 
 const isAIRelated = (text) => {
   const lower = text.toLowerCase();
-  return AI_KEYWORDS.some(keyword => lower.includes(keyword));
+
+  // 1단계: 긴 키워드 (정확한 매칭)
+  for (const kw of AI_CONTAINS_KEYWORDS) {
+    if (lower.includes(kw)) return true;
+  }
+
+  // 2단계: 짧은 키워드 (단어 경계 체크)
+  // \b로 앞뒤가 단어 경계여야 매칭 (예: "ai" O, "bonsai" X)
+  for (const kw of AI_WORD_KEYWORDS) {
+    const pattern = new RegExp(`\\b${kw}\\b`, 'i');
+    if (pattern.test(text)) {
+      // 제외 키워드가 있으면 스킵
+      const hasExcluded = EXCLUDE_KEYWORDS.some(ex => 
+        lower.includes(ex)
+      );
+      // 제외 키워드가 있어도, 명확한 AI 키워드가 있으면 통과
+      const hasStrongAI = AI_CONTAINS_KEYWORDS.some(k => lower.includes(k)) ||
+        /\b(llm|gpt|ai model|ai research|ai tool|ai lab|openai|anthropic)\b/i.test(text);
+      
+      if (hasExcluded && !hasStrongAI) {
+        // 제외 키워드만 있고 강한 AI 키워드는 없으면 통과 여부 결정
+        // 여기서는 보수적으로 스킵
+        continue;
+      }
+      return true;
+    }
+  }
+
+  return false;
 };
 
-// CORS 헤더 설정 (강화)
 const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -25,7 +72,6 @@ const setCorsHeaders = (res) => {
 export default async function handler(req, res) {
   setCorsHeaders(res);
   
-  // Preflight OPTIONS 요청 처리
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
