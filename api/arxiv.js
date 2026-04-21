@@ -1,15 +1,22 @@
 // api/arxiv.js - arXiv에서 최신 AI 논문 가져오기
 
-export default async function handler(req, res) {
+const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
+};
+
+export default async function handler(req, res) {
+  setCorsHeaders(res);
   
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
   try {
-    // cs.AI, cs.CL (NLP), cs.CV (Vision), cs.LG (ML) 카테고리
     const query = 'cat:cs.AI+OR+cat:cs.CL+OR+cat:cs.CV+OR+cat:cs.LG';
     const url = `https://export.arxiv.org/api/query?search_query=${query}&sortBy=submittedDate&sortOrder=descending&max_results=30`;
     
@@ -18,12 +25,10 @@ export default async function handler(req, res) {
     
     const text = await response.text();
     
-    // XML 파싱 (정규식 사용 - serverless 환경에서 DOMParser 없음)
     const entries = [];
     const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
     const matches = text.matchAll(entryRegex);
     
-    // 최근 3일 내
     const threeDaysAgo = Date.now() - 3 * 24 * 3600 * 1000;
     
     for (const match of matches) {
@@ -40,7 +45,6 @@ export default async function handler(req, res) {
         const summary = summaryMatch ? summaryMatch[1].trim() : '';
         const published = publishedMatch ? publishedMatch[1].trim() : new Date().toISOString();
         
-        // 최근 3일 필터링
         if (new Date(published).getTime() < threeDaysAgo) continue;
         
         entries.push({
@@ -56,9 +60,9 @@ export default async function handler(req, res) {
       }
     }
     
-    return res.status(200).json({ success: true, data: entries });
+    res.status(200).json({ success: true, data: entries });
   } catch (err) {
     console.error('arXiv error:', err);
-    return res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 }
