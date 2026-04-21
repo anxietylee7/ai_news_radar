@@ -1,6 +1,7 @@
-// api/hackernews.js - Hacker News에서 AI 관련 글 가져오기 (정규식 필터링)
+// api/hackernews.js - Hacker News 수집 (15분 캐싱)
 
-// 긴 키워드 (단어 안에 포함돼도 OK - includes 방식)
+import { kv } from '@vercel/kv';
+
 const AI_CONTAINS_KEYWORDS = [
   'openai', 'anthropic', 'chatgpt', 'claude', 'huggingface', 'langchain',
   'llama', 'mistral', 'gemini', 'grok', 'qwen', 'deepseek',
@@ -13,14 +14,12 @@ const AI_CONTAINS_KEYWORDS = [
   'text-to-image', 'text-to-video', 'speech recognition', 'speech synthesis',
 ];
 
-// 짧은 키워드 (단어 경계 체크 - 정규식 \b 사용)
 const AI_WORD_KEYWORDS = [
   'ai', 'llm', 'gpt', 'tts', 'stt', 'asr', 'vlm', 'mllm', 'sora',
   'agi', 'asi', 'rag', 'moe', 'nlp', 'cv', 'gan', 'vae',
   'prompt', 'token', 'agent', 'agentic', 'inference',
 ];
 
-// 제외 키워드 (false positive 방지)
 const EXCLUDE_KEYWORDS = [
   'aim', 'aid', 'aids', 'air', 'airplane', 'airport', 'aircraft',
   'aisle', 'tail', 'fail', 'email', 'retail', 'detail', 'available',
@@ -31,29 +30,18 @@ const EXCLUDE_KEYWORDS = [
 const isAIRelated = (text) => {
   const lower = text.toLowerCase();
 
-  // 1단계: 긴 키워드 (정확한 매칭)
   for (const kw of AI_CONTAINS_KEYWORDS) {
     if (lower.includes(kw)) return true;
   }
 
-  // 2단계: 짧은 키워드 (단어 경계 체크)
-  // \b로 앞뒤가 단어 경계여야 매칭 (예: "ai" O, "bonsai" X)
   for (const kw of AI_WORD_KEYWORDS) {
     const pattern = new RegExp(`\\b${kw}\\b`, 'i');
     if (pattern.test(text)) {
-      // 제외 키워드가 있으면 스킵
-      const hasExcluded = EXCLUDE_KEYWORDS.some(ex => 
-        lower.includes(ex)
-      );
-      // 제외 키워드가 있어도, 명확한 AI 키워드가 있으면 통과
+      const hasExcluded = EXCLUDE_KEYWORDS.some(ex => lower.includes(ex));
       const hasStrongAI = AI_CONTAINS_KEYWORDS.some(k => lower.includes(k)) ||
         /\b(llm|gpt|ai model|ai research|ai tool|ai lab|openai|anthropic)\b/i.test(text);
       
-      if (hasExcluded && !hasStrongAI) {
-        // 제외 키워드만 있고 강한 AI 키워드는 없으면 통과 여부 결정
-        // 여기서는 보수적으로 스킵
-        continue;
-      }
+      if (hasExcluded && !hasStrongAI) continue;
       return true;
     }
   }
@@ -69,6 +57,9 @@ const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Allow-Credentials', 'false');
 };
 
+const CACHE_KEY = 'hn:stories:v1';
+const CACHE_TTL = 900; // 15분
+
 export default async function handler(req, res) {
   setCorsHeaders(res);
   
@@ -78,6 +69,16 @@ export default async function handler(req, res) {
   }
 
   try {
+    // 🔍 캐시 확인
+    try {
+      const cached = await kv.get(CACHE_KEY);
+      if (cached) {
+        return res.status(200).json({ success: true, cached: true, data: cached });
+      }
+    } catch (e) {
+      console.warn('HN cache read failed:', e.message);
+    }
+
     const [topRes, newRes] = await Promise.all([
       fetch('https://hacker-news.firebaseio.com/v0/topstories.json'),
       fetch('https://hacker-news.firebaseio.com/v0/newstories.json'),
@@ -119,7 +120,14 @@ export default async function handler(req, res) {
         originalText: story.title,
       }));
     
-    res.status(200).json({ success: true, data: filtered });
+    // 💾 캐싱
+    try {
+      await kv.set(CACHE_KEY, filtered, { ex: CACHE_TTL });
+    } catch (e) {
+      console.warn('HN cache write failed:', e.message);
+    }
+    
+    res.status(200).json({ success: true, cached: false, data: filtered });
   } catch (err) {
     console.error('HN error:', err);
     res.status(500).json({ success: false, error: err.message });
