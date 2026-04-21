@@ -1,4 +1,6 @@
-// api/arxiv.js - arXiv에서 최신 AI 논문 가져오기
+// api/arxiv.js - arXiv 수집 (30분 캐싱)
+
+import { kv } from '@vercel/kv';
 
 const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -7,6 +9,9 @@ const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Max-Age', '86400');
   res.setHeader('Access-Control-Allow-Credentials', 'false');
 };
+
+const CACHE_KEY = 'arxiv:papers:v1';
+const CACHE_TTL = 1800; // 30분
 
 export default async function handler(req, res) {
   setCorsHeaders(res);
@@ -17,6 +22,16 @@ export default async function handler(req, res) {
   }
 
   try {
+    // 🔍 캐시 확인
+    try {
+      const cached = await kv.get(CACHE_KEY);
+      if (cached) {
+        return res.status(200).json({ success: true, cached: true, data: cached });
+      }
+    } catch (e) {
+      console.warn('arXiv cache read failed:', e.message);
+    }
+
     const query = 'cat:cs.AI+OR+cat:cs.CL+OR+cat:cs.CV+OR+cat:cs.LG';
     const url = `https://export.arxiv.org/api/query?search_query=${query}&sortBy=submittedDate&sortOrder=descending&max_results=30`;
     
@@ -60,7 +75,14 @@ export default async function handler(req, res) {
       }
     }
     
-    res.status(200).json({ success: true, data: entries });
+    // 💾 캐싱
+    try {
+      await kv.set(CACHE_KEY, entries, { ex: CACHE_TTL });
+    } catch (e) {
+      console.warn('arXiv cache write failed:', e.message);
+    }
+    
+    res.status(200).json({ success: true, cached: false, data: entries });
   } catch (err) {
     console.error('arXiv error:', err);
     res.status(500).json({ success: false, error: err.message });
