@@ -1,4 +1,6 @@
-// api/huggingface.js - HuggingFace Papers에서 큐레이션된 AI 논문 가져오기
+// api/huggingface.js - HuggingFace Papers (30분 캐싱)
+
+import { kv } from '@vercel/kv';
 
 const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -7,6 +9,9 @@ const setCorsHeaders = (res) => {
   res.setHeader('Access-Control-Max-Age', '86400');
   res.setHeader('Access-Control-Allow-Credentials', 'false');
 };
+
+const CACHE_KEY = 'hf:papers:v1';
+const CACHE_TTL = 1800; // 30분
 
 export default async function handler(req, res) {
   setCorsHeaders(res);
@@ -17,6 +22,16 @@ export default async function handler(req, res) {
   }
 
   try {
+    // 🔍 캐시 확인
+    try {
+      const cached = await kv.get(CACHE_KEY);
+      if (cached) {
+        return res.status(200).json({ success: true, cached: true, data: cached });
+      }
+    } catch (e) {
+      console.warn('HF cache read failed:', e.message);
+    }
+
     const today = new Date();
     const dates = [];
     for (let i = 0; i < 3; i++) {
@@ -82,10 +97,20 @@ export default async function handler(req, res) {
     });
 
     uniquePapers.sort((a, b) => b.score - a.score);
+    
+    const result = uniquePapers.slice(0, 50);
+
+    // 💾 캐싱
+    try {
+      await kv.set(CACHE_KEY, result, { ex: CACHE_TTL });
+    } catch (e) {
+      console.warn('HF cache write failed:', e.message);
+    }
 
     res.status(200).json({
-      success: uniquePapers.length > 0,
-      data: uniquePapers.slice(0, 50),
+      success: result.length > 0,
+      cached: false,
+      data: result,
       warnings: errors.length > 0 ? errors : null,
     });
   } catch (err) {
