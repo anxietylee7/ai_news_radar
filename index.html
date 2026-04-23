@@ -529,29 +529,63 @@
         setBookmarks(p => { const s = new Set(p); if (s.has(id)) s.delete(id); else s.add(id); return s; });
       };
 
-      const filtered = useMemo(() => {
-        const result = items.filter(item => {
-          if (selectedCategory !== '전체' && item.category !== selectedCategory) return false;
-          if (selectedSource !== '전체' && item.source !== selectedSource) return false;
-          if (showTodayOnly && !item.isNew) return false;
-          if (searchQuery) {
-            const q = searchQuery.toLowerCase();
-            if (!item.title.toLowerCase().includes(q) && !(item.originalText || '').toLowerCase().includes(q) && !(item.summaryKo || '').toLowerCase().includes(q)) return false;
-          }
-          return true;
-        });
-        
-        // 정렬
-        if (sortBy === 'popularity') {
-          // 인기순: score(HN) + score(HF). arXiv는 0.
-          result.sort((a, b) => (b.score || 0) - (a.score || 0));
-        } else {
-          // 최신순 (기본)
-          result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        }
-        
-        return result;
-      }, [items, selectedCategory, selectedSource, searchQuery, showTodayOnly, sortBy]);
+const filtered = useMemo(() => {
+  const result = items.filter(item => {
+    if (selectedCategory !== '전체' && item.category !== selectedCategory) return false;
+    if (selectedSource !== '전체' && item.source !== selectedSource) return false;
+    if (showTodayOnly && !item.isNew) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      if (!item.title.toLowerCase().includes(q) && !(item.originalText || '').toLowerCase().includes(q) && !(item.summaryKo || '').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+  
+  // 정렬
+  if (sortBy === 'popularity') {
+    // ===== 인기순: 7일 필터 + 소스별 정규화 + 시간 감쇠 =====
+    const now = Date.now();
+    const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+    
+    // 1) 최근 7일 이내 글만 필터
+    const recent = result.filter(item => new Date(item.date).getTime() >= sevenDaysAgo);
+    
+    // 2) 각 소스별 최고 점수 찾기 (정규화용 기준값)
+    const maxBySource = {};
+    recent.forEach(item => {
+      const s = item.source;
+      const score = item.score || 0;
+      if (!maxBySource[s] || score > maxBySource[s]) {
+        maxBySource[s] = score;
+      }
+    });
+    
+    // 3) 각 글에 "최종 점수" 계산해서 정렬
+    const scored = recent.map(item => {
+      const rawScore = item.score || 0;
+      const sourceMax = maxBySource[item.source] || 1;
+      
+      // 소스 내 정규화 (0.0 ~ 1.0)
+      const normalized = sourceMax > 0 ? rawScore / sourceMax : 0;
+      
+      // 시간 감쇠 (오늘: 1.0, 1일전: 0.85, 7일전: ~0.32)
+      const daysOld = (now - new Date(item.date).getTime()) / (24 * 60 * 60 * 1000);
+      const timeDecay = Math.pow(0.85, daysOld);
+      
+      const finalScore = normalized * timeDecay;
+      
+      return { ...item, _finalScore: finalScore };
+    });
+    
+    scored.sort((a, b) => b._finalScore - a._finalScore);
+    return scored;
+  } else {
+    // 최신순 (기본) - 기간 제한 없음
+    result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }
+  
+  return result;
+}, [items, selectedCategory, selectedSource, searchQuery, showTodayOnly, sortBy]);
 
       const formatTime = (s) => {
         const diff = Date.now() - new Date(s).getTime();
