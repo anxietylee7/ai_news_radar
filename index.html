@@ -882,27 +882,22 @@
                             <div className="flex items-center gap-3">
                               <span>{formatTime(item.date)}</span>
                               {sortBy === 'popularity' && item._heatScore !== undefined ? (
+                                <span 
+                                  className="flex items-center gap-1 font-bold text-orange-300"
+                                  title={`인기도: ${item._heatScore}점 (소스 내 순위 + 최신성 반영, 0~100)`}
+                                >
+                                  🔥 {item._heatScore}
+                                </span>
+                              ) : (
                                 <>
-                                  <span 
-                                    className="flex items-center gap-1 font-bold text-orange-300"
-                                    title={`인기도: ${item._heatScore}점 (소스 내 순위 + 최신성 반영, 0~100)`}
-                                  >
-                                    🔥 {item._heatScore}
-                                  </span>
                                   {item.score > 0 && (
-                                    <span className="text-white/50 text-[10px]" title="원점수 (HN: 투표, HF: upvote)">
-                                      · {item.score.toLocaleString()}
+                                    <span className="flex items-center gap-1 font-semibold">
+                                      <Icon name="trending-up" size={12} />{item.score.toLocaleString()}
                                     </span>
                                   )}
+                                  {item.comments > 0 && <span>💬 {item.comments}</span>}
                                 </>
-                              ) : (
-                                item.score > 0 && (
-                                  <span className="flex items-center gap-1 font-semibold">
-                                    <Icon name="trending-up" size={12} />{item.score.toLocaleString()}
-                                  </span>
-                                )
                               )}
-                              {item.comments > 0 && <span>💬 {item.comments}</span>}
                             </div>
                             {hasSummary ? (
                               <span className="text-[10px] text-white/50 italic">hover →</span>
