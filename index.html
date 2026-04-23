@@ -585,24 +585,31 @@
             </div>
 
             {/* Hero */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-10 sm:pt-14 pb-8">
-              <div className="text-center mb-10">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 mb-5">
-                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                  <span className="text-xs font-semibold tracking-wider text-white uppercase">LIVE</span>
-                  <span className="text-xs text-white/70">{today}</span>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-8 sm:pt-14 pb-6 sm:pb-8">
+              <div className="text-center mb-6 sm:mb-10">
+                <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 rounded-full bg-white/10 border border-white/20 mb-4 sm:mb-5">
+                  <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-400 animate-pulse" />
+                  <span className="text-[10px] sm:text-xs font-semibold tracking-wider text-white uppercase">LIVE</span>
+                  <span className="text-[10px] sm:text-xs text-white/70">{today}</span>
                 </div>
-                <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white mb-4 tracking-tight">
+                <h1 className="text-3xl sm:text-5xl md:text-6xl font-extrabold text-white mb-3 sm:mb-4 tracking-tight">
                   AI News <span className="bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">Radar</span>
                 </h1>
-                <p className="text-base sm:text-lg text-white/80 max-w-3xl mx-auto leading-relaxed">
+                <p className="text-sm sm:text-lg text-white/80 max-w-3xl mx-auto leading-relaxed px-2">
                   Hacker News · arXiv · HuggingFace에서 수집된 최신 AI 기술을 카테고리별로 정리해드려요.<br />
                   오늘 <span className="font-bold text-white">{newCounts['전체']}건</span>의 새로운 업데이트가 있어요.
                 </p>
               </div>
 
-              {/* Category Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '12px' }}>
+              {/* Category Grid - 반응형: 데스크톱 6개, 태블릿 3개, 모바일 1개 */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+                  gap: '12px',
+                }}
+                className="max-[900px]:!grid-cols-3 max-[600px]:!grid-cols-1"
+              >
                 {Object.keys(CATEGORIES).map(cat => {
                   const s = CATEGORIES[cat];
                   const sh = CATEGORY_SHADERS[cat];
@@ -766,7 +773,14 @@
               {filtered.length === 0 && !loading ? (
                 <div className="text-center py-20 text-white/60">조건에 맞는 글이 없습니다</div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '20px' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                    gap: '20px',
+                  }}
+                  className="max-[900px]:!grid-cols-2 max-[600px]:!grid-cols-1"
+                >
                   {filtered.map((item, idx) => {
                     const cs = CATEGORIES[item.category] || CATEGORIES['기타'];
                     const ss = SOURCES[item.source];
