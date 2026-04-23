@@ -529,66 +529,67 @@
         setBookmarks(p => { const s = new Set(p); if (s.has(id)) s.delete(id); else s.add(id); return s; });
       };
 
-const filtered = useMemo(() => {
-  const result = items.filter(item => {
-    if (selectedCategory !== '전체' && item.category !== selectedCategory) return false;
-    if (selectedSource !== '전체' && item.source !== selectedSource) return false;
-    if (showTodayOnly && !item.isNew) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      if (!item.title.toLowerCase().includes(q) && !(item.originalText || '').toLowerCase().includes(q) && !(item.summaryKo || '').toLowerCase().includes(q)) return false;
-    }
-    return true;
-  });
-  
-  // 정렬
-  if (sortBy === 'popularity') {
-    // ===== 인기순: 7일 필터 + 소스별 정규화 + 시간 감쇠 =====
-    const now = Date.now();
-    const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
-    
-    // 1) 최근 7일 이내 글만 필터
-    const recent = result.filter(item => new Date(item.date).getTime() >= sevenDaysAgo);
-    
-    // 2) 각 소스별 최고 점수 찾기 (정규화용 기준값)
-    const maxBySource = {};
-    recent.forEach(item => {
-      const s = item.source;
-      const score = item.score || 0;
-      if (!maxBySource[s] || score > maxBySource[s]) {
-        maxBySource[s] = score;
-      }
-    });
-    
-    // 3) 각 글에 "최종 점수" 계산해서 정렬
-    const scored = recent.map(item => {
-      const rawScore = item.score || 0;
-      const sourceMax = maxBySource[item.source] || 1;
-      
-      // 소스 내 정규화 (0.0 ~ 1.0)
-      const normalized = sourceMax > 0 ? rawScore / sourceMax : 0;
-      
-      // 시간 감쇠 (오늘: 1.0, 1일전: 0.85, 7일전: ~0.32)
-      const daysOld = (now - new Date(item.date).getTime()) / (24 * 60 * 60 * 1000);
-      const finalScore = normalized * timeDecay;
-
-// 화면 표시용 인기도 점수 (0~100, 소수점 없이)
-      const heatScore = Math.round(finalScore * 100);
-
-      return { ...item, _finalScore: finalScore, _heatScore: heatScore };
-      
-      return { ...item, _finalScore: finalScore };
-    });
-    
-    scored.sort((a, b) => b._finalScore - a._finalScore);
-    return scored;
-  } else {
-    // 최신순 (기본) - 기간 제한 없음
-    result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }
-  
-  return result;
-}, [items, selectedCategory, selectedSource, searchQuery, showTodayOnly, sortBy]);
+      const filtered = useMemo(() => {
+        const result = items.filter(item => {
+          if (selectedCategory !== '전체' && item.category !== selectedCategory) return false;
+          if (selectedSource !== '전체' && item.source !== selectedSource) return false;
+          if (showTodayOnly && !item.isNew) return false;
+          if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            if (!item.title.toLowerCase().includes(q) && !(item.originalText || '').toLowerCase().includes(q) && !(item.summaryKo || '').toLowerCase().includes(q)) return false;
+          }
+          return true;
+        });
+        
+        // 정렬
+        if (sortBy === 'popularity') {
+          // ===== 인기순: 7일 필터 + 소스별 정규화 + 시간 감쇠 =====
+          const now = Date.now();
+          const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+          
+          // 1) 최근 7일 이내 글만 필터 (rolling 7일: 오늘로부터 7일 전까지)
+          const recent = result.filter(item => new Date(item.date).getTime() >= sevenDaysAgo);
+          
+          // 2) 각 소스별 최고 점수 찾기 (정규화용 기준값)
+          const maxBySource = {};
+          recent.forEach(item => {
+            const s = item.source;
+            const score = item.score || 0;
+            if (!maxBySource[s] || score > maxBySource[s]) {
+              maxBySource[s] = score;
+            }
+          });
+          
+          // 3) 각 글에 "최종 점수" 계산해서 정렬
+          const scored = recent.map(item => {
+            const rawScore = item.score || 0;
+            const sourceMax = maxBySource[item.source] || 1;
+            
+            // 소스 내 정규화 (0.0 ~ 1.0) - HN 500점과 HF 50점을 공정하게 비교
+            const normalized = sourceMax > 0 ? rawScore / sourceMax : 0;
+            
+            // 시간 감쇠 계수 (오늘: 1.0, 1일전: 0.85, 3일전: 0.61, 7일전: 0.32)
+            const daysOld = (now - new Date(item.date).getTime()) / (24 * 60 * 60 * 1000);
+            const timeDecay = Math.pow(0.85, daysOld);
+            
+            // 최종 점수 = 정규화 점수 × 시간 감쇠
+            const finalScore = normalized * timeDecay;
+            
+            // 화면 표시용 인기도 점수 (0~100, 소수점 없이)
+            const heatScore = Math.round(finalScore * 100);
+            
+            return { ...item, _finalScore: finalScore, _heatScore: heatScore };
+          });
+          
+          scored.sort((a, b) => b._finalScore - a._finalScore);
+          return scored;
+        } else {
+          // 최신순 (기본) - 기간 제한 없음
+          result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        }
+        
+        return result;
+      }, [items, selectedCategory, selectedSource, searchQuery, showTodayOnly, sortBy]);
 
       const formatTime = (s) => {
         const diff = Date.now() - new Date(s).getTime();
@@ -803,7 +804,9 @@ const filtered = useMemo(() => {
                       인기순 (7일)
                     </button>
                   </div>
-                  <span className="text-xs text-white/50 hidden sm:inline">💡 카드 hover → 영어 원문 보기</span>
+                  <span className="text-xs text-white/50 hidden sm:inline">
+                    {sortBy === 'popularity' ? '🔥 인기도 = 소스 내 순위 + 최신성' : '💡 카드 hover → 영어 원문 보기'}
+                  </span>
                 </div>
               </div>
 
@@ -876,31 +879,31 @@ const filtered = useMemo(() => {
                             )}
                           </div>
                           <div className="flex items-center justify-between pt-3 mt-3 border-t border-white/15 text-xs text-white/70">
-                           <div className="flex items-center gap-3">
-  <span>{formatTime(item.date)}</span>
-  {sortBy === 'popularity' && item._heatScore !== undefined ? (
-    <>
-      <span 
-        className="flex items-center gap-1 font-bold text-orange-300"
-        title={`인기도: ${item._heatScore}점 (소스 내 순위 + 최신성 반영, 0~100)`}
-      >
-        🔥 {item._heatScore}
-      </span>
-      {item.score > 0 && (
-        <span className="text-white/50 text-[10px]" title="원점수 (HN: 투표, HF: upvote)">
-          · {item.score.toLocaleString()}
-        </span>
-      )}
-    </>
-  ) : (
-    item.score > 0 && (
-      <span className="flex items-center gap-1 font-semibold">
-        <Icon name="trending-up" size={12} />{item.score.toLocaleString()}
-      </span>
-    )
-  )}
-  {item.comments > 0 && <span>💬 {item.comments}</span>}
-</div>
+                            <div className="flex items-center gap-3">
+                              <span>{formatTime(item.date)}</span>
+                              {sortBy === 'popularity' && item._heatScore !== undefined ? (
+                                <>
+                                  <span 
+                                    className="flex items-center gap-1 font-bold text-orange-300"
+                                    title={`인기도: ${item._heatScore}점 (소스 내 순위 + 최신성 반영, 0~100)`}
+                                  >
+                                    🔥 {item._heatScore}
+                                  </span>
+                                  {item.score > 0 && (
+                                    <span className="text-white/50 text-[10px]" title="원점수 (HN: 투표, HF: upvote)">
+                                      · {item.score.toLocaleString()}
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                item.score > 0 && (
+                                  <span className="flex items-center gap-1 font-semibold">
+                                    <Icon name="trending-up" size={12} />{item.score.toLocaleString()}
+                                  </span>
+                                )
+                              )}
+                              {item.comments > 0 && <span>💬 {item.comments}</span>}
+                            </div>
                             {hasSummary ? (
                               <span className="text-[10px] text-white/50 italic">hover →</span>
                             ) : (
