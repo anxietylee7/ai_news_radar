@@ -500,20 +500,16 @@
         return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
       };
 
-     // 페이지 진입 시: 1) DB에서 즉시 로드 → 2) 백그라운드 자동 수집
-     useEffect(() => {
-       const initialLoad = async () => {
-         // 1단계: DB에 있는 거 먼저 보여주기 (빠른 첫 인상)
-         await loadItems();
-    
-         // 2단계: 백그라운드로 새 글 수집 (캐싱 덕에 비용 거의 없음)
-         // 약간 딜레이 두고 시작 (UX 안정)
-         setTimeout(() => {
-           collectAndReload();
-         }, 1000);
-       };
-       initialLoad();
-     }, []);
+      // 페이지 진입 시: 1) DB에서 즉시 로드 → 2) 백그라운드 자동 수집
+      useEffect(() => {
+        const initialLoad = async () => {
+          await loadItems();
+          setTimeout(() => {
+            collectAndReload();
+          }, 1000);
+        };
+        initialLoad();
+      }, []);
 
       return (
         <div className="relative min-h-screen w-full text-white bg-neutral-950">
