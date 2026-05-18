@@ -21,7 +21,7 @@ async function fetchHackerNews() {
   try {
     const topRes = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json');
     const topIds = await topRes.json();
-    const ids = topIds.slice(0, 30);
+    const ids = topIds.slice(0, 100);
     
     const items = await Promise.all(
       ids.map(async (id) => {
